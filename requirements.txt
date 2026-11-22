@@ -1,0 +1,16 @@
+# HCC World Model V1.0 — 依赖清单（自行按需增删版本）
+# Python 3.11 或 3.12 推荐
+
+torch
+numpy
+polars
+pyarrow
+pydantic
+fastapi
+uvicorn
+scikit-learn
+lightgbm
+matplotlib
+pytest
+pyyaml
+mlflow

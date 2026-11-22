@@ -1,0 +1,13 @@
+# 初始配置，非已验证最优超参
+experiment:
+  name: hcc-world-model-v1
+  seed: 42
+
+data:
+  patients: 10000
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  max_visits: 24
+  feature_dim: 32
+  synthetic_only: true

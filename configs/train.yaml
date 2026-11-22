@@ -1,0 +1,11 @@
+# 初始配置，非已验证最优超参
+training:
+  batch_size: 64
+  epochs: 60
+  learning_rate: 0.0003
+  early_stopping_patience: 10
+  gradient_clip_norm: 1.0
+
+forecast:
+  horizons_days: [30, 90, 180]
+  monte_carlo_samples: 100

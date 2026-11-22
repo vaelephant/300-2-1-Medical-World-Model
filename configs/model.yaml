@@ -1,0 +1,8 @@
+# 初始配置，非已验证最优超参
+model:
+  encoder: gru
+  hidden_dim: 128
+  latent_dim: 128
+  dynamics: probabilistic_gru
+  dropout: 0.15
+  predict_uncertainty: true
