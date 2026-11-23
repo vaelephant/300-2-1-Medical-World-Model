@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 import torch
@@ -58,6 +59,10 @@ def test_train_then_evaluate_writes_report(tmp_path):
     assert (out / "best.pt").exists()
     assert (out / "last.pt").exists()
     assert (out / "train_meta.json").exists()
+    progress = json.loads((out / "train_progress.json").read_text(encoding="utf-8"))
+    assert progress["status"] == "finished"
+    assert progress["epochs_trained"] == 2
+    assert progress["checkpoint"].endswith("best.pt")
 
     report = evaluate_checkpoint(
         checkpoint=out / "best.pt",

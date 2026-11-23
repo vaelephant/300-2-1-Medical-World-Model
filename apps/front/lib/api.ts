@@ -6,7 +6,9 @@ import type {
   ModelMeta,
   PatientSummary,
   PatientTrajectory,
+  ModelReloadResponse,
   TrainingInfo,
+  TrainingLiveResponse,
 } from "./types";
 
 const API_BASE =
@@ -88,6 +90,19 @@ export async function fetchModelCheckpoints() {
 /** reports/ 下评估报告摘要列表（按修改时间倒序）。 */
 export async function fetchEvaluationReports() {
   return getJson<EvaluationReportsResponse>("/api/v1/evaluations/reports");
+}
+
+/** 实时训练进度（progress 文件优先，回退 train_meta）。 */
+export async function fetchTrainingLive() {
+  return getJson<TrainingLiveResponse>("/api/v1/training/live");
+}
+
+/** 重新加载磁盘上的 checkpoint，让新训练权重立即生效。 */
+export async function reloadModelCheckpoint(force = true) {
+  return postJson<ModelReloadResponse>(
+    `/api/v1/models/reload?force=${force ? "true" : "false"}`,
+    {},
+  );
 }
 
 export async function fetchSimulation(patientId: string, horizon: number, contextLen: number, modality: string, dose: number) {

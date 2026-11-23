@@ -7,7 +7,7 @@ checkpoint / report provenance。
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 
 from apps.back.services.inference import get_service
 
@@ -27,6 +27,21 @@ def training():
     没有 train_meta.json 时返回 ``available=false``，不伪造训练曲线。
     """
     return get_service().training_info()
+
+
+@router.get("/training/live")
+def training_live():
+    """实时训练进度：读取 out_dir/train_progress.json；没有时回退到 train_meta。"""
+    return get_service().training_live_info()
+
+
+@router.post("/models/reload")
+def reload_checkpoint(force: bool = Query(False, description="强制重载，即使 checkpoint 未变化")):
+    """重新加载磁盘上的 checkpoint，让训练产出的新权重生效（无需重启 API）。"""
+    try:
+        return get_service().reload_checkpoint(force=force)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=f"重新加载 checkpoint 失败：{exc}")
 
 
 @router.get("/models/checkpoints")

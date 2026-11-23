@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +34,7 @@ from apps.back.services.artifacts import (
     list_reports,
     report_summary,
     resolve_report_path,
+    training_live,
     training_summary,
 )
 
@@ -70,10 +72,12 @@ class InferenceService:
         self.config = dict(self.ckpt.get("config", {}))
         self.model_version = str(self.config.get("model_version", "unknown"))
 
-        # 演示患者：优先用 checkpoint 的 test_idx 对应 ID；否则读目录前 N 个
+        # 推理端加载完整队列：checkpoint 里的 max_patients 是训练子集上限，
+        # 不能拿来截断演示患者（否则重训后精选病例会 404）。
         cap = max_patients
         if cap is None:
-            cap = int(self.config.get("max_patients") or 1000)
+            env_cap = int(os.environ.get("MWM_MAX_PATIENTS", "0") or 0)
+            cap = env_cap if env_cap > 0 else None
         self.dataset = TrajectoryDataset(
             self.data_dir,
             max_patients=cap,
@@ -86,6 +90,82 @@ class InferenceService:
         # 数据来源优先从 manifest 派生；缺失时退回单个患者轨迹字段 / unknown。
         self._dataset = dataset_summary(self.data_dir)
         self.data_source = self._dataset.get("data_source") or "unknown"
+        self._max_patients = cap
+        self._checkpoint_signature = self._checkpoint_signature_now()
+        self._reload_lock = threading.RLock()
+
+    # ------------------------------------------------------------------
+    def _checkpoint_signature_now(self) -> Optional[tuple]:
+        try:
+            stat = self.checkpoint.stat()
+        except OSError:
+            return None
+        return (stat.st_mtime_ns, stat.st_size)
+
+    @property
+    def checkpoint_changed_on_disk(self) -> bool:
+        return self._checkpoint_signature_now() != self._checkpoint_signature
+
+    def reload_checkpoint(self, force: bool = False) -> Dict[str, Any]:
+        """重新加载磁盘上的 checkpoint（训练覆盖 best.pt 后使用）。
+
+        ``force=False`` 时只在文件 mtime/size 变化时重载；``force=True`` 强制重载。
+        重载会同时刷新 normalizer / config / dataset（manifest 可能变化）。
+        注意：重载与推理并发时没有全局推理锁；建议在前端显式点击、空闲时执行。
+        """
+        with self._reload_lock:
+            signature = self._checkpoint_signature_now()
+            changed = signature != self._checkpoint_signature
+            if not force and not changed:
+                return {
+                    "reloaded": False,
+                    "changed": False,
+                    "model_version": self.model_version,
+                    "checkpoint": str(self.checkpoint),
+                    "message": "checkpoint 未变化；如需强制重载请传 force=true。",
+                }
+            previous_version = self.model_version
+            previous_signature = self._checkpoint_signature
+            model, normalizer, ckpt = load_model(self.checkpoint, device=self.device)
+            config = dict(ckpt.get("config", {}))
+            model_version = str(config.get("model_version", "unknown"))
+            cap = self._max_patients
+            dataset = TrajectoryDataset(
+                self.data_dir,
+                max_patients=cap,
+                max_visits=int(config.get("max_visits", 12)),
+            )
+            self.model = model
+            self.normalizer = normalizer
+            self.ckpt = ckpt
+            self.config = config
+            self.model_version = model_version
+            self.dataset = dataset
+            self._id_to_idx = {
+                dataset[i]["patient_id"]: i for i in range(len(dataset))
+            }
+            self._traj_cache = {}
+            self._dataset = dataset_summary(self.data_dir)
+            self.data_source = self._dataset.get("data_source") or "unknown"
+            self._max_patients = cap
+            self._checkpoint_signature = signature
+            return {
+                "reloaded": True,
+                "changed": bool(changed),
+                "previous_model_version": previous_version,
+                "model_version": model_version,
+                "checkpoint": str(self.checkpoint),
+                "previous_checkpoint_signature": previous_signature,
+                "checkpoint_signature": signature,
+                "message": "已重新加载磁盘上的 checkpoint / normalizer / config。",
+            }
+
+    # ------------------------------------------------------------------
+    def training_live_info(self) -> Dict[str, Any]:
+        """最近一次/正在进行的训练进度（train_progress.json 或 train_meta）。"""
+        payload = training_live(self.checkpoint)
+        payload["checkpoint_changed_on_disk"] = self.checkpoint_changed_on_disk
+        return payload
 
     # ------------------------------------------------------------------
     def dataset_info(self) -> Dict[str, Any]:

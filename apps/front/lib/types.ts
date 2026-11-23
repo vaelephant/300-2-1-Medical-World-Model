@@ -185,3 +185,54 @@ export type EvaluationReportsResponse = {
   reports_dir?: string;
   research_only?: boolean;
 };
+
+/** 训练中每 epoch 原子写出的 train_progress.json；无 progress 时由后端回退 train_meta。 */
+export type TrainingLiveResponse = {
+  available: boolean;
+  source?: "progress" | "train_meta" | "none" | string;
+  status?: "running" | "evaluating" | "finished" | "idle" | string;
+  stalled?: boolean;
+  stale_seconds?: number | null;
+  stale_after_seconds?: number | null;
+  history?: TrainingHistoryPoint[];
+  epochs_configured?: number | null;
+  epochs_trained?: number | null;
+  best_val?: number | null;
+  best_epoch?: number | null;
+  config?: Record<string, unknown>;
+  data_manifest?: {
+    path?: string;
+    exists?: boolean;
+    n?: number | null;
+    seed?: number | null;
+    max_visits?: number | null;
+    data_source?: string | null;
+  };
+  device?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_sec?: number | null;
+  updated_at?: string | null;
+  eval_report?: string | null;
+  checkpoint?: string | null;
+  last_checkpoint?: string | null;
+  model_version?: string | null;
+  checkpoint_changed_on_disk?: boolean;
+  beats_persistence_mae?: boolean | null;
+  beats_persistence_mae_macro?: boolean | null;
+  beats_persistence_mae_ex_afp?: boolean | null;
+  test_mae_ex_afp_wm?: number | null;
+  test_mae_ex_afp_persistence?: number | null;
+  progress_file?: ArtifactFile;
+  train_meta?: TrainingInfo;
+  message?: string;
+};
+
+export type ModelReloadResponse = {
+  reloaded: boolean;
+  changed?: boolean;
+  previous_model_version?: string;
+  model_version: string;
+  checkpoint: string;
+  message: string;
+};

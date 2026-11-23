@@ -36,8 +36,8 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="DR.SEEK HCC World Model API",
-        version="0.3.0",
-        description="研究原型推理服务（synthetic / research_only）；新增 provenance / 训练历史 / checkpoint 与报告列表。",
+        version="0.4.0",
+        description="研究原型推理服务（synthetic / research_only）；支持 provenance、训练历史、实时训练进度与 checkpoint reload。",
         lifespan=lifespan,
     )
     app.add_middleware(

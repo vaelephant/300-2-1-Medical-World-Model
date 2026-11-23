@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { useEffect } from "react"
 import {
   Activity,
+  ChartLine,
   ClipboardCheck,
   FlaskConical,
   LayoutDashboard,
@@ -54,6 +55,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/world-model", label: "病程预测", icon: Activity },
       { href: "/simulation", label: "治疗情景", icon: FlaskConical },
+      { href: "/training", label: "训练监控", icon: ChartLine },
     ],
   },
   {

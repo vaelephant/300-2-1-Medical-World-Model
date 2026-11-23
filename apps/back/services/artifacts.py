@@ -118,6 +118,16 @@ def training_summary(checkpoint: Path, include_history: bool = True) -> Dict[str
         "device": meta.get("device"),
         "patience": meta.get("patience"),
         "eval_report": meta.get("eval_report"),
+        "config": meta.get("config"),
+        "data_manifest": meta.get("data_manifest"),
+        "epochs_configured": meta.get("epochs_configured"),
+        "started_at": meta.get("started_at"),
+        "finished_at": meta.get("finished_at"),
+        "duration_sec": meta.get("duration_sec"),
+        "num_workers": meta.get("num_workers"),
+        "torch_version": meta.get("torch_version"),
+        "model_version": meta.get("model_version"),
+        "last_checkpoint": meta.get("last_checkpoint"),
         "research_only": bool(meta.get("research_only", True)),
         "beats_persistence": {
             "mae": meta.get("beats_persistence_mae"),
@@ -207,6 +217,87 @@ def list_reports(reports_dir: Path) -> List[Dict[str, Any]]:
     items = [report_summary(path) for path in sorted(reports_dir.glob("*.json"))]
     items.sort(key=lambda item: (item.get("report") or {}).get("modified_at") or "", reverse=True)
     return items
+
+
+def training_live(checkpoint: Path, stale_after_seconds: int = 120) -> Dict[str, Any]:
+    """读取 out_dir/train_progress.json；没有 progress 时回退到 train_meta。
+
+    训练脚本每个 epoch 原子写一次 progress，因此前端可轮询获得实时曲线。
+    """
+    checkpoint = Path(checkpoint)
+    progress_path = checkpoint.parent / "train_progress.json"
+    progress = read_json(progress_path)
+    meta = training_summary(checkpoint, include_history=True)
+    now = datetime.now(tz=timezone.utc)
+
+    if progress is not None:
+        payload: Dict[str, Any] = dict(progress)
+        status = str(payload.get("status") or "running")
+        stale_seconds: Optional[int] = None
+        raw_updated = payload.get("updated_at")
+        if isinstance(raw_updated, str):
+            try:
+                updated = datetime.fromisoformat(raw_updated)
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+                stale_seconds = max(0, int((now - updated).total_seconds()))
+            except ValueError:
+                stale_seconds = None
+        stale = bool(
+            stale_seconds is not None
+            and stale_seconds > stale_after_seconds
+            and status in {"running", "evaluating"}
+        )
+        payload.update(
+            {
+                "available": True,
+                "source": "progress",
+                "status": status,
+                "stalled": stale,
+                "stale_after_seconds": stale_after_seconds,
+                "stale_seconds": stale_seconds,
+                "progress_file": artifact_file(progress_path),
+                "train_meta": meta,
+                "epochs_trained": len(payload.get("history") or []),
+            }
+        )
+        if stale:
+            payload["message"] = (
+                f"train_progress.json 已超过 {stale_after_seconds}s 未更新；"
+                "训练可能变慢/中断，或进程仍在写评估。"
+            )
+        return payload
+
+    if meta.get("available"):
+        payload = dict(meta)
+        # training_summary 里 checkpoint 是 artifact_file 对象；实时 payload 需要 string path。
+        checkpoint_info = payload.get("checkpoint")
+        if isinstance(checkpoint_info, dict):
+            payload["checkpoint_file"] = checkpoint_info
+            payload["checkpoint"] = checkpoint_info.get("path")
+        payload.update(
+            {
+                "available": True,
+                "source": "train_meta",
+                "status": "finished",
+                "stalled": False,
+                "stale_seconds": None,
+                "progress_file": artifact_file(progress_path),
+                "epochs_trained": len(meta.get("history") or []),
+                "message": "未找到 train_progress.json，显示最近一次训练结束后的 train_meta。",
+            }
+        )
+        return payload
+
+    return {
+        "available": False,
+        "source": "none",
+        "status": "idle",
+        "stalled": False,
+        "stale_seconds": None,
+        "progress_file": artifact_file(progress_path),
+        "message": "没有找到训练进度或 train_meta；请先运行训练脚本。",
+    }
 
 
 def resolve_report_path(reports_dir: Path, name: Optional[str]) -> Path:

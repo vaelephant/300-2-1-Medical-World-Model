@@ -153,6 +153,59 @@ def _utc_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    """原子写 JSON，避免前端/监控接口读到半个文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _progress_payload(
+    *,
+    status: str,
+    config: Dict[str, Any],
+    manifest: Dict[str, Any],
+    device: str,
+    started_at: str,
+    epochs_configured: int,
+    history: List[Dict[str, Any]],
+    best_val: Optional[float],
+    best_epoch: Optional[int],
+    n_train: int,
+    n_val: int,
+    n_test: int,
+    checkpoint: Path,
+    last_checkpoint: Path,
+    model_version: str,
+    seed: int,
+    num_workers: int,
+) -> Dict[str, Any]:
+    """训练实时 progress（写 out_dir/train_progress.json，供 API/前端轮询）。"""
+    return {
+        "status": status,
+        "model_version": model_version,
+        "checkpoint": str(checkpoint),
+        "last_checkpoint": str(last_checkpoint),
+        "config": config,
+        "data_manifest": manifest,
+        "device": device,
+        "started_at": started_at,
+        "updated_at": _utc_now(),
+        "epochs_configured": epochs_configured,
+        "epochs_trained": len(history),
+        "history": history,
+        "best_val": best_val if best_val != float("inf") else None,
+        "best_epoch": best_epoch,
+        "n_train": n_train,
+        "n_val": n_val,
+        "n_test": n_test,
+        "seed": seed,
+        "num_workers": num_workers,
+        "research_only": True,
+    }
+
+
 def train_world_model(
     data_dir: str | Path,
     out_dir: str | Path,
@@ -255,6 +308,32 @@ def train_world_model(
     best_path = out_dir / "best.pt"
     last_path = out_dir / "last.pt"
     stale = 0
+    progress_path = out_dir / "train_progress.json"
+
+    def write_progress(status: str = "running", **extra: Any) -> None:
+        payload = _progress_payload(
+            status=status,
+            config=config,
+            manifest=manifest,
+            device=str(device),
+            started_at=started_at,
+            epochs_configured=epochs,
+            history=history,
+            best_val=best_val,
+            best_epoch=best_epoch,
+            n_train=len(train_idx),
+            n_val=len(val_idx),
+            n_test=len(test_idx),
+            checkpoint=best_path,
+            last_checkpoint=last_path,
+            model_version=model_version,
+            seed=seed,
+            num_workers=num_workers,
+        )
+        payload.update(extra)
+        _write_json_atomic(progress_path, payload)
+
+    write_progress()
 
     for epoch in range(1, epochs + 1):
         train_loss = _run_epoch(
@@ -295,7 +374,10 @@ def train_world_model(
             stale += 1
             if stale >= patience:
                 print(json.dumps({"early_stop": True, "epoch": epoch, "patience": patience}))
+                write_progress(stalled=stale)
                 break
+
+        write_progress()
 
     if not best_path.exists():
         # 极端情况下（例如 epochs=0 被外部绕过）至少把 last 当作 best。
@@ -330,6 +412,7 @@ def train_world_model(
     }
 
     if run_eval and best_path.exists():
+        write_progress(status="evaluating")
         # 延迟导入，避免循环依赖在模块加载期爆掉
         from packages.training.evaluate import evaluate_checkpoint
 
@@ -368,6 +451,19 @@ def train_world_model(
         except Exception as exc:  # 评估失败不阻断训练产物
             meta["eval_error"] = str(exc)
             print(json.dumps({"eval_error": str(exc)}), flush=True)
+
+    write_progress(
+        status="finished",
+        finished_at=meta.get("finished_at"),
+        duration_sec=meta.get("duration_sec"),
+        eval_report=meta.get("eval_report"),
+        eval_error=meta.get("eval_error"),
+        beats_persistence_mae=meta.get("beats_persistence_mae"),
+        beats_persistence_mae_macro=meta.get("beats_persistence_mae_macro"),
+        beats_persistence_mae_ex_afp=meta.get("beats_persistence_mae_ex_afp"),
+        test_mae_ex_afp_wm=meta.get("test_mae_ex_afp_wm"),
+        test_mae_ex_afp_persistence=meta.get("test_mae_ex_afp_persistence"),
+    )
 
     (out_dir / "train_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta

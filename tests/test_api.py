@@ -216,3 +216,35 @@ def test_models_meta_includes_derived_provenance(client):
     assert "available" in body["training"]
     assert body["predictive_uncertainty"]["available"] is False
     assert body["predictive_uncertainty"]["reason"]
+
+
+def test_training_live_endpoint(client):
+    body = client.get("/api/v1/training/live").json()
+    assert body["available"] is True
+    assert body["source"] in {"progress", "train_meta"}
+    assert body["status"] in {"running", "evaluating", "finished"}
+    assert isinstance(body["history"], list) and body["history"]
+    assert "checkpoint_changed_on_disk" in body
+
+
+def test_reload_checkpoint_endpoint(client):
+    unchanged = client.post("/api/v1/models/reload").json()
+    assert unchanged["reloaded"] is False
+    assert "checkpoint" in unchanged
+
+    forced = client.post("/api/v1/models/reload", params={"force": True}).json()
+    assert forced["reloaded"] is True
+    assert forced["model_version"]
+    assert "previous_model_version" in forced
+    assert client.post("/api/v1/models/reload").json()["reloaded"] is False
+
+
+def test_inference_loads_full_cohort_not_training_subset(client):
+    # checkpoint 的 max_patients 是训练子集上限（例如 300），推理端不能据此截断患者。
+    first = client.get("/api/v1/patients?limit=1").json()
+    assert first["count"] == 1
+    demo_case = "SYN00733"
+    if (DATA / f"{demo_case}.json").exists():
+        response = client.get(f"/api/v1/patients/{demo_case}")
+        assert response.status_code == 200, response.text
+        assert response.json()["patient"]["patient_id"] == demo_case
