@@ -370,6 +370,130 @@ class InferenceService:
             "note": "研究原型输出，非临床结论；轨迹来自合成数据动力学学习。",
         }
 
+    def cohort_summary(self) -> Dict[str, Any]:
+        """全队列摘要：每患者基线/末次指标、治疗事件、结局与随访跨度。
+
+        只读本地合成轨迹；用于队列探索页的单次请求。结果缓存在内存中。
+        """
+        cached = getattr(self, "_cohort_cache", None)
+        if cached is not None:
+            return cached
+
+        def feature(observation, key: str) -> Optional[float]:
+            if observation.missing_mask.get(key):
+                return None
+            value = observation.features.get(key)
+            return float(value) if isinstance(value, (int, float)) else None
+
+        def snapshot(observation) -> Dict[str, Any]:
+            return {
+                key: feature(observation, key)
+                for key in ("tumor_size_cm", "afp", "albumin", "tbil", "tumor_number")
+            }
+
+        patients: List[Dict[str, Any]] = []
+        stage_counts: Dict[str, int] = {}
+        child_pugh_counts: Dict[str, int] = {}
+        treatment_counts: Dict[str, int] = {}
+        outcome_counts: Dict[str, int] = {}
+        progression_days: List[int] = []
+
+        for pid in self._id_to_idx:
+            traj = self.get_trajectory(pid)
+            patient = traj.patient
+            visits = traj.visits
+            if not visits:
+                continue
+            first = visits[0].observation
+            last = visits[-1].observation
+            bclc = getattr(patient.bclc_stage, "value", str(patient.bclc_stage))
+            child_pugh = getattr(patient.child_pugh, "value", str(patient.child_pugh))
+            sex = getattr(patient.sex, "value", str(patient.sex))
+
+            treatments: Dict[str, int] = {}
+            treatment_events: List[Dict[str, Any]] = []
+            for visit in visits:
+                for treatment in visit.treatments:
+                    modality = getattr(treatment.modality, "value", str(treatment.modality))
+                    treatments[modality] = treatments.get(modality, 0) + 1
+                    treatment_events.append(
+                        {
+                            "day": int(treatment.days_from_index),
+                            "modality": modality,
+                            "dose_intensity": float(treatment.dose_intensity),
+                        }
+                    )
+
+            outcomes = [
+                {
+                    "event": getattr(outcome.event, "value", str(outcome.event)),
+                    "occurred": bool(outcome.occurred),
+                    "days_from_index": int(outcome.days_from_index),
+                }
+                for outcome in traj.outcomes
+            ]
+            progression = next(
+                (
+                    outcome
+                    for outcome in outcomes
+                    if outcome["event"] == "progression" and outcome["occurred"]
+                ),
+                None,
+            )
+            if progression is not None:
+                progression_days.append(progression["days_from_index"])
+
+            stage_counts[bclc] = stage_counts.get(bclc, 0) + 1
+            child_pugh_counts[child_pugh] = child_pugh_counts.get(child_pugh, 0) + 1
+            for outcome in outcomes:
+                event = outcome["event"]
+                outcome_counts[event] = outcome_counts.get(event, 0) + 1
+            for modality, count in treatments.items():
+                treatment_counts[modality] = treatment_counts.get(modality, 0) + count
+
+            patients.append(
+                {
+                    "patient_id": patient.patient_id,
+                    "sex": sex,
+                    "age_at_index": patient.age_at_index,
+                    "bclc_stage": bclc,
+                    "child_pugh": child_pugh,
+                    "etiology": getattr(patient.etiology, "value", str(patient.etiology)),
+                    "diagnosis_date": str(patient.diagnosis_date),
+                    "n_visits": len(visits),
+                    "follow_up_days": int(last.days_from_index - first.days_from_index),
+                    "baseline": snapshot(first),
+                    "last": snapshot(last),
+                    "treatments": treatments,
+                    "n_treatments": sum(treatments.values()),
+                    "treatment_events": treatment_events,
+                    "outcomes": outcomes,
+                    "progression": progression,
+                }
+            )
+
+        result = {
+            "available": True,
+            "n_patients": len(patients),
+            "data_source": self.data_source,
+            "research_only": True,
+            "patients": patients,
+            "aggregate": {
+                "stage_counts": stage_counts,
+                "child_pugh_counts": child_pugh_counts,
+                "treatment_event_counts": treatment_counts,
+                "outcome_event_counts": outcome_counts,
+                "n_with_progression": len(progression_days),
+                "progression_days": sorted(progression_days),
+            },
+            "note": (
+                "合成队列的描述统计：结局/进展时间不是风险模型输出，"
+                "不能当作个体风险预测或临床证据。"
+            ),
+        }
+        self._cohort_cache = result
+        return result
+
     def load_evaluation_report(
         self, report_path: Optional[str | Path] = None, report_name: Optional[str] = None
     ) -> Dict[str, Any]:

@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from apps.back.routes import evaluation, forecast, metadata, patients, simulate
+from apps.back.routes import cohort, evaluation, forecast, metadata, patients, simulate
 from apps.back.services.inference import get_service, reset_service
 
 
@@ -36,8 +36,8 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="DR.SEEK HCC World Model API",
-        version="0.4.0",
-        description="研究原型推理服务（synthetic / research_only）；支持 provenance、训练历史、实时训练进度与 checkpoint reload。",
+        version="0.5.0",
+        description="研究原型推理服务（synthetic / research_only）；支持 provenance、训练历史、实时训练进度、checkpoint reload 与队列摘要。",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -52,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(simulate.router)
     app.include_router(evaluation.router)
     app.include_router(metadata.router)
+    app.include_router(cohort.router)
 
     @app.get("/health")
     def health():

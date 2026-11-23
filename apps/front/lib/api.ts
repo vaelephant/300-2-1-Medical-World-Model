@@ -1,5 +1,6 @@
 import type {
   CheckpointsResponse,
+  CohortSummaryResponse,
   EvalReport,
   EvaluationReportsResponse,
   ForecastResponse,
@@ -95,6 +96,11 @@ export async function fetchEvaluationReports() {
 /** 实时训练进度（progress 文件优先，回退 train_meta）。 */
 export async function fetchTrainingLive() {
   return getJson<TrainingLiveResponse>("/api/v1/training/live");
+}
+
+/** 全队列汇总（一次返回全部合成患者 + aggregate 描述统计）；用于 /cohort 探索页。 */
+export async function fetchCohortSummary() {
+  return getJson<CohortSummaryResponse>("/api/v1/cohort/summary");
 }
 
 /** 重新加载磁盘上的 checkpoint，让新训练权重立即生效。 */

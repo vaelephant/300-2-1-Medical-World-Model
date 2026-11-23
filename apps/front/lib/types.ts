@@ -247,3 +247,72 @@ export type ModelReloadResponse = {
   checkpoint: string;
   message: string;
 };
+
+// ---------------------------------------------------------------------------
+// Cohort exploration（/api/v1/cohort/summary）：全队列描述统计，不是风险模型输出。
+// ---------------------------------------------------------------------------
+
+export type CohortFeatureSnapshot = {
+  tumor_size_cm?: number | null;
+  afp?: number | null;
+  albumin?: number | null;
+  tbil?: number | null;
+  tumor_number?: number | null;
+};
+
+export type CohortTreatmentEvent = {
+  day?: number | null;
+  modality?: string;
+  dose_intensity?: number | null;
+};
+
+export type CohortOutcome = {
+  event?: string;
+  occurred?: boolean;
+  days_from_index?: number | null;
+};
+
+export type CohortProgression = {
+  event?: string;
+  occurred?: boolean;
+  days_from_index?: number | null;
+};
+
+export type CohortPatient = {
+  patient_id: string;
+  sex?: string;
+  age_at_index?: number;
+  bclc_stage?: string;
+  child_pugh?: string;
+  etiology?: string;
+  diagnosis_date?: string;
+  n_visits?: number;
+  follow_up_days?: number | null;
+  baseline?: CohortFeatureSnapshot;
+  last?: CohortFeatureSnapshot;
+  treatments?: Record<string, number>;
+  n_treatments?: number;
+  treatment_events?: CohortTreatmentEvent[];
+  outcomes?: CohortOutcome[];
+  progression?: CohortProgression | null;
+};
+
+export type CohortAggregate = {
+  stage_counts?: Record<string, number>;
+  child_pugh_counts?: Record<string, number>;
+  treatment_event_counts?: Record<string, number>;
+  outcome_event_counts?: Record<string, number>;
+  n_with_progression?: number;
+  progression_days?: number[];
+};
+
+export type CohortSummaryResponse = {
+  available?: boolean;
+  n_patients?: number;
+  data_source?: string;
+  research_only?: boolean;
+  patients: CohortPatient[];
+  aggregate?: CohortAggregate;
+  note?: string;
+  message?: string;
+};

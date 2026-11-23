@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   FlaskConical,
   LayoutDashboard,
+  ScatterChart,
   Users,
   type LucideIcon,
 } from "lucide-react"
@@ -48,6 +49,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/", label: "演示总览", icon: LayoutDashboard },
       { href: "/patients", label: "患者病程", icon: Users },
+      { href: "/cohort", label: "队列探索", icon: ScatterChart },
     ],
   },
   {

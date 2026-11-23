@@ -248,3 +248,29 @@ def test_inference_loads_full_cohort_not_training_subset(client):
         response = client.get(f"/api/v1/patients/{demo_case}")
         assert response.status_code == 200, response.text
         assert response.json()["patient"]["patient_id"] == demo_case
+
+
+def test_cohort_summary_endpoint(client):
+    body = client.get("/api/v1/cohort/summary").json()
+    assert body["available"] is True
+    assert body["research_only"] is True
+    assert body["data_source"] in {"synthetic", "unknown", "public"}
+    assert body["n_patients"] == len(body["patients"]) >= 1
+    sample = body["patients"][0]
+    for key in (
+        "patient_id",
+        "bclc_stage",
+        "child_pugh",
+        "baseline",
+        "last",
+        "treatments",
+        "n_treatments",
+        "outcomes",
+        "follow_up_days",
+    ):
+        assert key in sample
+    assert set(sample["baseline"]) >= {"tumor_size_cm", "afp", "albumin", "tbil"}
+    aggregate = body["aggregate"]
+    assert sum(aggregate["stage_counts"].values()) == body["n_patients"]
+    assert "progression_days" in aggregate
+    assert "不是风险模型" in body["note"]
