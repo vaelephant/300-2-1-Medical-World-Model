@@ -20,7 +20,7 @@ def list_patients(
         "patients": patients,
         "count": len(patients),
         "research_only": True,
-        "data_source": "synthetic",
+        "data_source": svc.data_source,
     }
 
 
@@ -33,5 +33,7 @@ def get_patient(patient_id: str):
         raise HTTPException(status_code=404, detail=f"患者不存在：{patient_id}")
     payload = traj.model_dump(mode="json")
     payload["research_only"] = True
-    payload["data_source"] = "synthetic"
+    payload["data_source"] = (
+        getattr(traj.patient, "data_source", None) or svc.data_source
+    )
     return payload

@@ -41,6 +41,11 @@ def test_health(client):
     assert body["status"] == "ok"
     assert body["research_only"] is True
     assert "model_version" in body
+    # data_source 由本地 manifest 派生，而不是硬编码。
+    assert body["data_source"] in {"synthetic", "unknown", "public"}
+    assert body["dataset"]["available"] is True
+    assert body["dataset"]["manifest"]["exists"] is True
+    assert body["dataset"]["n_patients_manifest"] >= 1
 
 
 def test_list_and_get_patient(client):
@@ -72,6 +77,10 @@ def test_forecast(client):
     assert len(body["predictions"]) == 4
     assert "afp" in body["predictions"][0]["features"]
     assert body["model_version"]
+    # 当前 MVP 不输出预测分布：必须显式说明不可用，而不是让前端误解为置信区间。
+    assert body["uncertainty"] is None
+    assert body["uncertainty_status"]["available"] is False
+    assert body["uncertainty_status"]["reason"]
 
 
 def test_models_and_evaluations(client):
@@ -128,3 +137,82 @@ def test_forecast_does_not_use_later_observations(client, monkeypatch):
         visit.observation.features['afp'] = 999999
     monkeypatch.setattr(svc, 'get_trajectory', lambda _: changed)
     assert svc.forecast(pid, context_len=2, horizon=2) == original
+
+
+def test_provenance_endpoint(client):
+    r = client.get("/api/v1/provenance")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["research_only"] is True
+    assert body["data_source"] in {"synthetic", "unknown", "public"}
+    # 数据集 provenance 来自 manifest.json，而不是硬编码。
+    assert body["dataset"]["available"] is True
+    assert body["dataset"]["manifest"]["exists"] is True
+    assert body["dataset"]["seed"] is not None
+    assert body["checkpoint"]["path"]
+    assert body["checkpoint"]["model_version"]
+    # 当前报告与报告列表来自 reports/*.json。
+    assert body["current_report"]["available"] is True
+    assert isinstance(body["reports"], list) and body["reports"]
+    assert any(item["report"]["path"].endswith("eval_mvp.json") for item in body["reports"])
+    assert isinstance(body["checkpoints"], list) and body["checkpoints"]
+    assert any(item["is_current"] for item in body["checkpoints"])
+
+
+def test_training_endpoint(client):
+    r = client.get("/api/v1/training")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "available" in body
+    if body["available"]:
+        assert body["checkpoint"]["exists"] is True
+        assert isinstance(body["history"], list) and body["history"]
+        assert body["epochs_trained"] == len(body["history"])
+        assert body["best_val"] is not None
+        assert body["splits"]["n_train"] >= 1
+        assert body["model_version"]
+    else:
+        # 没有 train_meta.json 时必须说明原因，而不是返回空曲线。
+        assert body["reason"]
+
+
+def test_checkpoints_endpoint(client):
+    r = client.get("/api/v1/models/checkpoints")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["current_checkpoint"]
+    assert isinstance(body["checkpoints"], list) and body["checkpoints"]
+    current = [item for item in body["checkpoints"] if item["is_current"]]
+    assert len(current) == 1
+    assert current[0]["exists"] is True
+    assert current[0]["size_bytes"] > 0
+
+
+def test_reports_endpoint_and_report_selection(client):
+    listing = client.get("/api/v1/evaluations/reports")
+    assert listing.status_code == 200, listing.text
+    reports = listing.json()["reports"]
+    assert isinstance(reports, list) and reports
+    names = [item["report"]["path"].rsplit("/", 1)[-1] for item in reports]
+    assert "eval_mvp.json" in names
+
+    default = client.get("/api/v1/evaluations")
+    assert default.status_code == 200
+    explicit = client.get("/api/v1/evaluations", params={"report": "eval_mvp.json"})
+    assert explicit.status_code == 200
+    assert explicit.json()["available"] is True
+    assert explicit.json()["report_file"].endswith("eval_mvp.json")
+
+    missing = client.get("/api/v1/evaluations", params={"report": "does-not-exist.json"})
+    assert missing.status_code == 404
+    traversal = client.get("/api/v1/evaluations", params={"report": "../eval_mvp.json"})
+    assert traversal.status_code == 404
+
+
+def test_models_meta_includes_derived_provenance(client):
+    body = client.get("/api/v1/models").json()
+    assert body["data_source"] in {"synthetic", "unknown", "public"}
+    assert "training" in body
+    assert "available" in body["training"]
+    assert body["predictive_uncertainty"]["available"] is False
+    assert body["predictive_uncertainty"]["reason"]

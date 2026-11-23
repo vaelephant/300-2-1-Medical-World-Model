@@ -27,6 +27,15 @@ from packages.data.schemas import CLINICAL_FEATURE_KEYS, PatientTrajectory, Trea
 from packages.training.rollout import load_model, rollout_batch
 from packages.training.train import resolve_device
 
+from apps.back.services.artifacts import (
+    dataset_summary,
+    list_checkpoints,
+    list_reports,
+    report_summary,
+    resolve_report_path,
+    training_summary,
+)
+
 
 class InferenceService:
     def __init__(
@@ -44,6 +53,11 @@ class InferenceService:
         )
         self.device_name = device_name or os.environ.get("MWM_DEVICE", "auto")
         self.device = resolve_device(self.device_name)
+        # 产物目录：checkpoint 所在 models 根目录与 reports/ 均可通过环境变量覆盖。
+        self.models_dir = Path(
+            os.environ.get("MWM_MODELS_DIR", str(self.checkpoint.parent.parent))
+        )
+        self.reports_dir = Path(os.environ.get("MWM_REPORTS_DIR", "reports"))
 
         if not self.checkpoint.exists():
             raise FileNotFoundError(f"找不到权重：{self.checkpoint}")
@@ -69,13 +83,70 @@ class InferenceService:
             self.dataset[i]["patient_id"]: i for i in range(len(self.dataset))
         }
         self._traj_cache: Dict[str, PatientTrajectory] = {}
+        # 数据来源优先从 manifest 派生；缺失时退回单个患者轨迹字段 / unknown。
+        self._dataset = dataset_summary(self.data_dir)
+        self.data_source = self._dataset.get("data_source") or "unknown"
+
+    # ------------------------------------------------------------------
+    def dataset_info(self) -> Dict[str, Any]:
+        """数据集 manifest 摘要（seed / n / max_visits / data_source）。"""
+        return dict(self._dataset)
+
+    def current_report_path(self) -> Path:
+        """当前评估报告路径。
+
+        - ``MWM_EVAL_REPORT`` 若包含路径分隔符，按显式路径处理（兼容旧配置）；
+        - 否则视为 reports/ 下的文件名，交给 ``resolve_report_path`` 做安全校验。
+        """
+        raw = os.environ.get("MWM_EVAL_REPORT")
+        if raw and ("/" in raw or "\\" in raw or os.sep in raw):
+            return Path(raw)
+        try:
+            return resolve_report_path(self.reports_dir, None)
+        except (ValueError, FileNotFoundError):
+            return self.reports_dir / "eval_mvp.json"
+
+    def provenance(self) -> Dict[str, Any]:
+        """当前服务使用的数据、checkpoint、评估报告的 provenance。"""
+        current_report = report_summary(self.current_report_path())
+        return {
+            "research_only": True,
+            "data_source": self.data_source,
+            "dataset": self.dataset_info(),
+            "checkpoint": {
+                "path": str(self.checkpoint),
+                "model_version": self.model_version,
+                "training": training_summary(self.checkpoint, include_history=False),
+            },
+            "current_report": current_report,
+            "reports": list_reports(self.reports_dir),
+            "checkpoints": list_checkpoints(self.models_dir, current=self.checkpoint),
+            "note": (
+                "provenance 全部由本地产物派生：manifest.json / train_meta.json / "
+                "checkpoint 文件 / reports/*.json；未提供的数据不会用占位数值代替。"
+            ),
+        }
+
+    def training_info(self) -> Dict[str, Any]:
+        """训练历史与 split 摘要（来自 checkpoint 同目录 train_meta.json）。"""
+        summary = training_summary(self.checkpoint, include_history=True)
+        summary["model_version"] = self.model_version
+        summary["checkpoint_path"] = str(self.checkpoint)
+        return summary
+
+    def checkpoints(self) -> List[Dict[str, Any]]:
+        return list_checkpoints(self.models_dir, current=self.checkpoint)
+
+    def reports(self) -> List[Dict[str, Any]]:
+        return list_reports(self.reports_dir)
 
     # ------------------------------------------------------------------
     def meta(self) -> Dict[str, Any]:
+        training = training_summary(self.checkpoint, include_history=False)
         return {
             "model_version": self.model_version,
             "checkpoint": str(self.checkpoint),
-            "data_source": "synthetic",
+            "data_source": self.data_source,
             "research_only": True,
             "device": str(self.device),
             "n_patients_loaded": len(self.dataset),
@@ -84,6 +155,21 @@ class InferenceService:
                 "latent_dim": self.config.get("latent_dim"),
                 "residual": self.config.get("residual", True),
                 "max_visits": self.config.get("max_visits"),
+            },
+            "training": {
+                "available": training.get("available"),
+                "best_val": training.get("best_val"),
+                "best_epoch": training.get("best_epoch"),
+                "epochs_trained": training.get("epochs_trained"),
+                "splits": training.get("splits"),
+                "train_meta": training.get("train_meta"),
+            },
+            "predictive_uncertainty": {
+                "available": False,
+                "reason": (
+                    "MVP 动力学为确定性均值模型，未输出预测分布；"
+                    "config.predict_uncertainty 仅为规划开关，当前不应解读为置信区间。"
+                ),
             },
         }
 
@@ -184,20 +270,48 @@ class InferenceService:
         return {
             "patient_id": patient_id,
             "model_version": self.model_version,
-            "data_source": "synthetic",
+            "data_source": getattr(traj.patient, "data_source", None) or self.data_source,
             "research_only": True,
             "prediction_horizon": horizon,
             "context_len": ctx,
             "forecast_origin_day": last_day,
             "step_days": mean_gap,
             "uncertainty": None,  # MVP 残差均值模型尚未输出分布
+            "uncertainty_status": {
+                "available": False,
+                "method": None,
+                "reason": (
+                    "MVP 动力学为确定性均值模型，未输出预测分布；"
+                    "config.predict_uncertainty 仅为规划开关，当前不应解读为置信区间。"
+                ),
+            },
             "history_days": hist_days,
             "predictions": predictions,
             "note": "研究原型输出，非临床结论；轨迹来自合成数据动力学学习。",
         }
 
-    def load_evaluation_report(self, report_path: Optional[str | Path] = None) -> Dict[str, Any]:
-        path = Path(report_path or os.environ.get("MWM_EVAL_REPORT", "reports/eval_mvp.json"))
+    def load_evaluation_report(
+        self, report_path: Optional[str | Path] = None, report_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """读取评估报告。
+
+        - ``report_name``：reports/ 下的文件名（推荐，用于 /evaluations?report=...）；
+        - ``report_path``：显式路径（测试/脚本用，保持向后兼容）。
+        文件名会被安全解析，拒绝路径穿越；不存在时返回 available=false 而不是抛异常。
+        """
+        try:
+            if report_path is not None:
+                path = Path(report_path)
+            elif report_name is not None:
+                path = resolve_report_path(self.reports_dir, report_name)
+            else:
+                path = self.current_report_path()
+        except (ValueError, FileNotFoundError) as exc:
+            return {
+                "research_only": True,
+                "available": False,
+                "message": str(exc),
+            }
         if not path.exists():
             return {
                 "research_only": True,
@@ -206,6 +320,7 @@ class InferenceService:
             }
         data = json.loads(path.read_text(encoding="utf-8"))
         data["available"] = True
+        data["report_file"] = str(path)
         return data
 
 

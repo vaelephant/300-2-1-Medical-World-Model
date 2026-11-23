@@ -27,7 +27,7 @@ v-1/                     # 归档：旧 Medical World Model MVP
 项目文档/
 ```
 
-当前已实现合成病程、模型训练与评估、权重推理 API，以及五个前端页面。治疗模拟支持固定未来治疗条件，属于合成数据模型响应实验；影像、风险头训练和不确定性校准尚未完成。
+当前已实现合成病程、模型训练与评估、权重推理 API，以及「左侧边栏功能分区 + 右侧全宽功能区」的五个前端页面。治疗模拟支持固定未来治疗条件，属于合成数据模型响应实验；影像、风险头训练和不确定性校准尚未完成。
 
 快速启动见 [项目文档/0-快速启动.md](项目文档/0-快速启动.md)。
 
@@ -36,8 +36,8 @@ v-1/                     # 归档：旧 Medical World Model MVP
 1. `packages/data/schemas.py` — 患者 / 观察 / 治疗 / 结局 Schema  
 2. `synthetic_generator.py` + `disease_simulator.py` — 合成轨迹  
 3. `dataset.py` + `scripts/train_world_model.py` — 端到端训练链路  
-4. `apps/back` API（`/health` → forecast / simulate）  
-5. `apps/front` 五页：Overview / Patients / World Model / Simulation / Evaluation  
+4. `apps/back` API（`/health` → forecast / simulate；`/api/v1/provenance` / `training` / `models/checkpoints` / `evaluations/reports` 暴露训练与评估产物 metadata）  
+5. `apps/front` 五页：Overview / Patients / World Model / Simulation / Evaluation（侧边栏分组：演示工作台 / 世界模型 / 模型证据）  
 
 ## 环境（自行安装）
 
@@ -58,7 +58,8 @@ cp .env.local.example .env.local # 首次配置
 npm run dev
 ```
 
-页面：Overview / Patients / World Model / Simulation / Evaluation。
+页面：英文路由 Overview / Patients / World Model / Simulation / Evaluation，侧边栏对应中文功能项「演示总览 / 患者病程 / 病程预测 / 治疗情景 / 模型评估」；`/world-model` 定起点并预测，`/simulation` 做同起点情景比较与回顾对照。  
+3–5 分钟演示脚本（5 个精选病例、参数解释、边界话术）见 [项目文档/4-演示流程.md](项目文档/4-演示流程.md)。
 
 预测使用前 `context_len` 次随访，从最后一个输入观测日开始；超过可用长度时按实际长度截断。后续观测仅供回顾比较。`/simulate` 接收 `treatment_modality` 与 `[0,1]` 的 `dose_intensity`，覆盖每个未来步的治疗向量，不修改历史。省略治疗类别时与 forecast 相同。该接口不验证因果疗效。
 
