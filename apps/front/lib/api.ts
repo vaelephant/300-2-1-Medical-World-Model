@@ -1,9 +1,12 @@
 import type {
+  CheckpointsResponse,
   EvalReport,
+  EvaluationReportsResponse,
   ForecastResponse,
   ModelMeta,
   PatientSummary,
   PatientTrajectory,
+  TrainingInfo,
 } from "./types";
 
 const API_BASE =
@@ -70,6 +73,21 @@ export async function fetchModelMeta() {
 
 export async function fetchEvaluations() {
   return getJson<EvalReport>("/api/v1/evaluations");
+}
+
+/** 训练历史与 split 摘要（读取 checkpoint 同目录 train_meta.json；无文件时 available=false）。 */
+export async function fetchTraining() {
+  return getJson<TrainingInfo>("/api/v1/training");
+}
+
+/** 模型目录下所有 .pt 的路径、大小、修改时间与是否为当前服务权重。 */
+export async function fetchModelCheckpoints() {
+  return getJson<CheckpointsResponse>("/api/v1/models/checkpoints");
+}
+
+/** reports/ 下评估报告摘要列表（按修改时间倒序）。 */
+export async function fetchEvaluationReports() {
+  return getJson<EvaluationReportsResponse>("/api/v1/evaluations/reports");
 }
 
 export async function fetchSimulation(patientId: string, horizon: number, contextLen: number, modality: string, dose: number) {

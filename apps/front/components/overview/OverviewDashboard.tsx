@@ -2,11 +2,15 @@
 
 import Link from "next/link";
 
-import type { ModelMeta } from "@/lib/types";
+import type {
+  CheckpointsResponse,
+  EvaluationReportsResponse,
+  ModelMeta,
+  TrainingInfo,
+} from "@/lib/types";
 import { demoCases } from "@/lib/demo-cases";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import {
   configValue,
   difference,
@@ -15,107 +19,15 @@ import {
   type FullEvalReport,
   type HealthResponse,
 } from "@/components/overview/types";
-
-function Panel({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      aria-label={title}
-      className="rounded-lg border border-outline-variant/50 bg-surface-lowest p-5"
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold text-on-surface">{title}</h2>
-        {description ? (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      <div className="mt-4">{children}</div>
-    </section>
-  );
-}
-
-function Field({
-  label,
-  children,
-  mono = false,
-}: {
-  label: string;
-  children: React.ReactNode;
-  mono?: boolean;
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "mt-0.5 text-sm text-on-surface",
-          mono && "break-all font-mono text-xs",
-        )}
-      >
-        {children}
-      </dd>
-    </div>
-  );
-}
-
-function StatusBadge({
-  tone,
-  label,
-}: {
-  tone: "ok" | "bad" | "neutral";
-  label: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-        tone === "ok" && "border-tertiary/40 bg-tertiary-container/60 text-tertiary",
-        tone === "bad" && "border-error/40 bg-error-container/50 text-error",
-        tone === "neutral" &&
-          "border-outline-variant bg-surface-low text-muted-foreground",
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "inline-block size-1.5 rounded-full",
-          tone === "ok" ? "bg-tertiary" : tone === "bad" ? "bg-error" : "bg-outline",
-        )}
-      />
-      {label}
-    </span>
-  );
-}
-
-function BeatBadge({ label, beats }: { label: string; beats?: boolean }) {
-  const state = beats === true ? "ok" : beats === false ? "bad" : "neutral";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
-        state === "ok" && "border-tertiary/40 bg-tertiary-container/60 text-tertiary",
-        state === "bad" && "border-error/40 bg-error-container/50 text-error",
-        state === "neutral" &&
-          "border-outline-variant bg-surface-low text-muted-foreground",
-      )}
-    >
-      <span aria-hidden="true">
-        {beats === true ? "✓" : beats === false ? "✕" : "?"}
-      </span>
-      <span className="font-medium">{label}</span>
-      <span className="text-[0.65rem]">
-        {beats === true ? "优于" : beats === false ? "未优于" : "未提供"}
-      </span>
-    </span>
-  );
-}
+import {
+  BeatBadge,
+  Field,
+  Panel,
+  StatusBadge,
+} from "@/components/overview/primitives";
+import { CheckpointsTable } from "@/components/overview/CheckpointsTable";
+import { ReportsTable } from "@/components/overview/ReportsTable";
+import { TrainingCurve } from "@/components/overview/TrainingCurve";
 
 function ModelCardSection({
   meta,
@@ -422,17 +334,21 @@ function BoundarySection() {
     <Panel title="数据与边界" description="不伪造缺失的数据。">
       <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
         <li>
-          训练历史、checkpoint 列表、外部验证数据目前没有 API（仅单份评估报告）：
-          <span className="text-on-surface">「训练历史 / 外部验证接口待补」</span>
-          ，本页不会用占位曲线或虚构数字填充。
+          训练曲线来自 checkpoint 同目录 train_meta.json，checkpoint 列表来自
+          artifacts/models/**/*.pt，报告列表来自 reports/*.json；以上均为本地产物只读，
+          缺失时显示原因而不是占位数据。
+        </li>
+        <li>
+          外部验证数据、预测不确定性（uncertainty）目前没有可用 API 字段：
+          本页不展示置信区间，也不伪造外部验证结果。
         </li>
         <li>
           推理与评估的数据来源、research_only 标记均以 API 返回为准；本系统是研究原型，
           不是已验证的临床决策工具。
         </li>
         <li>
-          评估报告与当前推理服务版本不一致时，模型卡会显示警告；请以同一次训练 /
-          评估产物为准。
+          评估报告与当前推理服务版本 / 权重不一致时，模型卡与报告列表会显示警告；
+          请以同一次训练 / 评估产物为准。
         </li>
       </ul>
     </Panel>
@@ -446,6 +362,12 @@ export function OverviewDashboard({
   healthError,
   report,
   reportError,
+  training,
+  trainingError,
+  checkpoints,
+  checkpointsError,
+  reports,
+  reportsError,
   loading,
   apiBase,
 }: {
@@ -455,25 +377,46 @@ export function OverviewDashboard({
   healthError: string | null;
   report: FullEvalReport | null;
   reportError: string | null;
+  training: TrainingInfo | null;
+  trainingError: string | null;
+  checkpoints: CheckpointsResponse | null;
+  checkpointsError: string | null;
+  reports: EvaluationReportsResponse | null;
+  reportsError: string | null;
   loading: boolean;
   apiBase: string;
 }) {
   return (
     <div className="flex flex-col gap-6">
       <ModelCardSection meta={meta} metaError={metaError} report={report} />
-      <div className="grid gap-6 xl:grid-cols-2">
-        <EvaluationSection
-          report={report}
-          reportError={reportError}
-          loading={loading}
-        />
-        <ServiceSection
-          health={health}
-          healthError={healthError}
-          apiBase={apiBase}
-          loading={loading}
-        />
-      </div>
+      <TrainingCurve
+        training={training}
+        trainingError={trainingError}
+        loading={loading}
+      />
+      <CheckpointsTable
+        checkpoints={checkpoints}
+        checkpointsError={checkpointsError}
+        loading={loading}
+      />
+      <EvaluationSection
+        report={report}
+        reportError={reportError}
+        loading={loading}
+      />
+      <ReportsTable
+        reports={reports}
+        reportsError={reportsError}
+        loading={loading}
+        meta={meta}
+        defaultReportFile={report?.report_file}
+      />
+      <ServiceSection
+        health={health}
+        healthError={healthError}
+        apiBase={apiBase}
+        loading={loading}
+      />
       <QuickLinksSection />
       <BoundarySection />
     </div>
