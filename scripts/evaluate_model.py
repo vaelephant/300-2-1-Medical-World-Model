@@ -23,6 +23,8 @@ def main() -> None:
     p.add_argument("--device", default="auto")
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--context-len", type=int, default=3)
+    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument("--pin-memory", action="store_true")
     p.add_argument(
         "--report",
         default=None,
@@ -41,6 +43,8 @@ def main() -> None:
         batch_size=args.batch_size,
         context_len=args.context_len,
         report_path=report,
+        num_workers=args.num_workers,
+        pin_memory=bool(args.pin_memory),
     )
     summary = {
         "beats_persistence_mae_ex_afp": out["beats_persistence_mae_ex_afp"],
@@ -52,6 +56,7 @@ def main() -> None:
         "mae_macro_persistence": out["persistence"]["mae_macro"],
         "mae_wm": out["world_model"]["mae_mean"],
         "mae_persistence": out["persistence"]["mae_mean"],
+        "mae_delta_model_minus_persistence": out.get("mae_delta_model_minus_persistence"),
         "report": str(report),
         "research_only": True,
         "note": "主看 mae_ex_afp；mae_mean/macro 仍可能被 AFP 原始尺度主导",

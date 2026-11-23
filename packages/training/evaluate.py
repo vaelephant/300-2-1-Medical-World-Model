@@ -15,9 +15,10 @@ from torch.utils.data import DataLoader, Subset
 
 from packages.data.dataset import FEATURE_DIM, FeatureNormalizer, TrajectoryDataset, collate_trajectories
 from packages.data.schemas import CLINICAL_FEATURE_KEYS as FEATURE_KEYS
+from packages.data.splits import split_indices
 from packages.training.baselines import persistence_next_step
 from packages.training.rollout import load_model
-from packages.training.train import resolve_device, split_indices
+from packages.training.train import resolve_device
 from packages.world_model.model import HCCWorldModel
 
 
@@ -32,22 +33,28 @@ def one_step_feature_metrics(
     abs_err = err.abs() * valid_f
     sq_err = (err ** 2) * valid_f
     denom = valid_f.sum().clamp_min(1.0)
-    per_denom = valid_f.sum(dim=(0, 1)).clamp_min(1.0)
+    counts = valid_f.sum(dim=(0, 1))
+    per_denom = counts.clamp_min(1.0)
 
     mae_t = abs_err.sum(dim=(0, 1)) / per_denom
     rmse_t = torch.sqrt(sq_err.sum(dim=(0, 1)) / per_denom)
     mae_per = mae_t.tolist()
     rmse_per = rmse_t.tolist()
-    # mae_mean：所有有效点微平均（易被 AFP 主导）
-    # mae_macro：各特征 MAE 再平均（更适合「是否全面优于基线」）
+    # 只在「至少有一个有效观测」的特征上做宏平均，避免全缺失特征被当成 0 拉低均值。
+    present = counts > 0
+    present_any = bool(present.any().item())
     afp_i = FEATURE_KEYS.index("afp")
-    mask_ex = torch.ones(len(FEATURE_KEYS), dtype=torch.bool)
+    mask_ex = present.clone()
     mask_ex[afp_i] = False
+    mae_macro = float(mae_t[present].mean().item()) if present_any else None
+    mae_ex_afp = (
+        float(mae_t[mask_ex].mean().item()) if bool(mask_ex.any().item()) else None
+    )
     return {
         "mae_mean": float(abs_err.sum() / denom),
         "rmse_mean": float(torch.sqrt(sq_err.sum() / denom)),
-        "mae_macro": float(mae_t.mean().item()),
-        "mae_ex_afp": float(mae_t[mask_ex].mean().item()),
+        "mae_macro": mae_macro,
+        "mae_ex_afp": mae_ex_afp,
         "mae_per_feature": {
             FEATURE_KEYS[i]: float(mae_per[i]) for i in range(len(FEATURE_KEYS))
         },
@@ -55,6 +62,9 @@ def one_step_feature_metrics(
             FEATURE_KEYS[i]: float(rmse_per[i]) for i in range(len(FEATURE_KEYS))
         },
         "n_valid": int(valid_f.sum().item()),
+        "n_valid_per_feature": {
+            FEATURE_KEYS[i]: int(counts[i].item()) for i in range(len(FEATURE_KEYS))
+        },
     }
 
 
@@ -62,7 +72,7 @@ def _move_batch(batch: Dict[str, Any], device: torch.device) -> Dict[str, Any]:
     return {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in batch.items()}
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def evaluate_world_model_one_step(
     model: HCCWorldModel,
     normalizer: FeatureNormalizer,
@@ -94,7 +104,7 @@ def evaluate_world_model_one_step(
     )
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def evaluate_persistence(loader: DataLoader) -> Dict[str, Any]:
     preds, targets, valids = [], [], []
     for batch in loader:
@@ -109,7 +119,7 @@ def evaluate_persistence(loader: DataLoader) -> Dict[str, Any]:
     )
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def evaluate_rollout_horizons(
     model: HCCWorldModel,
     normalizer: FeatureNormalizer,
@@ -165,14 +175,27 @@ def evaluate_rollout_horizons(
             count[h] += step_ok.float().sum(dim=0).cpu()
 
     out: Dict[str, Any] = {"context_len": context_len, "horizons": {}}
+    afp_i = FEATURE_KEYS.index("afp")
     for h in horizons:
-        c = count[h].clamp_min(1.0)
+        counts_h = count[h]
+        c = counts_h.clamp_min(1.0)
+        present = counts_h > 0
+        # 全缺失特征给 0 占位，但宏平均只在 present 特征上计算。
         mae = (sum_abs[h] / c).tolist()
         rmse = torch.sqrt(sum_sq[h] / c).tolist()
+        mae_t = sum_abs[h] / c
+        mask_ex = present.clone()
+        mask_ex[afp_i] = False
         out["horizons"][str(h)] = {
             "mae_mean": float((sum_abs[h].sum() / c.sum()).item()),
             "rmse_mean": float(torch.sqrt(sum_sq[h].sum() / c.sum()).item()),
+            "mae_macro": float(mae_t[present].mean().item()) if bool(present.any().item()) else None,
+            "mae_ex_afp": (
+                float(mae_t[mask_ex].mean().item()) if bool(mask_ex.any().item()) else None
+            ),
             "mae_per_feature": {FEATURE_KEYS[i]: float(mae[i]) for i in range(FEATURE_DIM)},
+            "rmse_per_feature": {FEATURE_KEYS[i]: float(rmse[i]) for i in range(FEATURE_DIM)},
+            "n_valid": int(counts_h.sum().item()),
         }
     return out
 
@@ -181,13 +204,44 @@ def _loader_for_split(
     ds: TrajectoryDataset,
     indices: List[int],
     batch_size: int = 32,
+    num_workers: int = 0,
+    pin_memory: bool = False,
 ) -> DataLoader:
     return DataLoader(
         Subset(ds, indices),
         batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_trajectories,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=num_workers > 0,
     )
+
+
+def _read_data_source(data_dir: str | Path) -> str:
+    """评估报告的数据来源优先从 manifest 派生，缺失时回退 config。"""
+    path = Path(data_dir) / "manifest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "unknown"
+    if isinstance(payload, dict) and payload.get("data_source"):
+        return str(payload["data_source"])
+    return "unknown"
+
+
+def _beats(model: Optional[float], base: Optional[float]) -> bool:
+    return (
+        isinstance(model, (int, float))
+        and isinstance(base, (int, float))
+        and float(model) < float(base)
+    )
+
+
+def _delta(model: Optional[float], base: Optional[float]) -> Optional[float]:
+    if isinstance(model, (int, float)) and isinstance(base, (int, float)):
+        return float(model) - float(base)
+    return None
 
 
 def evaluate_checkpoint(
@@ -201,6 +255,8 @@ def evaluate_checkpoint(
     report_path: Optional[str | Path] = None,
     rollout_horizons: Sequence[int] = (1, 2, 3, 4),
     context_len: int = 3,
+    num_workers: int = 0,
+    pin_memory: bool = False,
 ) -> Dict[str, Any]:
     """加载 best.pt，在指定 split 上对比 world model vs persistence。"""
     device = resolve_device(device_name)
@@ -232,7 +288,13 @@ def evaluate_checkpoint(
     if not indices:
         raise RuntimeError(f"split={split} 为空")
 
-    loader = _loader_for_split(ds, indices, batch_size=batch_size)
+    loader = _loader_for_split(
+        ds,
+        indices,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
 
     wm = evaluate_world_model_one_step(model, normalizer, loader, device)
     pers = evaluate_persistence(loader)
@@ -245,24 +307,38 @@ def evaluate_checkpoint(
         context_len=context_len,
     )
 
-    better_micro = wm["mae_mean"] < pers["mae_mean"]
-    better_macro = wm["mae_macro"] < pers["mae_macro"]
-    better_ex_afp = wm["mae_ex_afp"] < pers["mae_ex_afp"]
+    better_micro = _beats(wm.get("mae_mean"), pers.get("mae_mean"))
+    better_macro = _beats(wm.get("mae_macro"), pers.get("mae_macro"))
+    better_ex_afp = _beats(wm.get("mae_ex_afp"), pers.get("mae_ex_afp"))
+    delta_micro = _delta(wm.get("mae_mean"), pers.get("mae_mean"))
+    delta_macro = _delta(wm.get("mae_macro"), pers.get("mae_macro"))
     report = {
         "research_only": True,
-        "data_source": "synthetic",
+        "data_source": _read_data_source(data_dir),
         "model_version": cfg.get("model_version", "unknown"),
         "checkpoint": str(checkpoint),
         "split": split,
         "n_patients": len(indices),
+        "model_config": {
+            "hidden_dim": cfg.get("hidden_dim"),
+            "latent_dim": cfg.get("latent_dim"),
+            "residual": cfg.get("residual"),
+            "dropout": cfg.get("dropout"),
+            "max_visits": max_visits,
+        },
         "world_model": wm,
         "persistence": pers,
         "rollout": rollout,
         "beats_persistence_mae": better_micro,
         "beats_persistence_mae_macro": better_macro,
         "beats_persistence_mae_ex_afp": better_ex_afp,
-        "mae_improvement": float(pers["mae_mean"] - wm["mae_mean"]),
-        "mae_macro_improvement": float(pers["mae_macro"] - wm["mae_macro"]),
+        # 显式命名方向：模型 − 基线；正数表示模型误差更大。
+        "mae_delta_model_minus_persistence": delta_micro,
+        "mae_macro_delta_model_minus_persistence": delta_macro,
+        # 兼容旧字段：历史定义是 persistence − world_model，正数表示模型更好。
+        "mae_improvement": -delta_micro if delta_micro is not None else None,
+        "mae_macro_improvement": -delta_macro if delta_macro is not None else None,
+        "mae_improvement_definition": "persistence_minus_world_model (legacy; positive means model better)",
         "note": "合成数据指标≠临床性能；mae_mean 易被 AFP 主导，请同时看 mae_macro / mae_ex_afp。",
     }
 

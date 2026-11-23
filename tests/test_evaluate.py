@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
 
 from packages.data.dataset import TrajectoryDataset, collate_trajectories
@@ -36,7 +37,7 @@ def test_one_step_metrics_finite():
 
 def test_train_then_evaluate_writes_report(tmp_path):
     out = tmp_path / "model"
-    train_world_model(
+    meta = train_world_model(
         data_dir=SYN_DIR,
         out_dir=out,
         max_patients=40,
@@ -47,6 +48,17 @@ def test_train_then_evaluate_writes_report(tmp_path):
         seed=0,
         patience=5,
     )
+    # train_meta / checkpoint 应记录可追溯的训练信息。
+    assert meta["best_epoch"] is not None
+    assert meta["epochs_trained"] == 2
+    assert meta["config"]["model_version"]
+    assert meta["data_source"] == "synthetic"
+    assert meta["data_manifest"]["exists"] is True
+    assert meta["torch_version"]
+    assert (out / "best.pt").exists()
+    assert (out / "last.pt").exists()
+    assert (out / "train_meta.json").exists()
+
     report = evaluate_checkpoint(
         checkpoint=out / "best.pt",
         data_dir=SYN_DIR,
@@ -57,4 +69,19 @@ def test_train_then_evaluate_writes_report(tmp_path):
     assert report["research_only"] is True
     assert "world_model" in report
     assert "persistence" in report
+    assert report["data_source"] == "synthetic"
+    # 显式方向的 delta 字段 + 兼容旧字段。
+    assert "mae_delta_model_minus_persistence" in report
+    assert "mae_macro_delta_model_minus_persistence" in report
+    assert "mae_improvement_definition" in report
+    wm_macro = report["world_model"]["mae_macro"]
+    pers_macro = report["persistence"]["mae_macro"]
+    if wm_macro is not None and pers_macro is not None:
+        assert report["mae_macro_delta_model_minus_persistence"] == pytest.approx(
+            wm_macro - pers_macro
+        )
+    # rollout 现在也提供排除 AFP 的宏平均与有效样本数。
+    horizon = report["rollout"]["horizons"]["1"]
+    assert "mae_ex_afp" in horizon
+    assert "n_valid" in horizon
     assert (tmp_path / "eval.json").exists()
