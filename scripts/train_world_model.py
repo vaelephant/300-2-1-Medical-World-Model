@@ -18,7 +18,7 @@ def main() -> None:
     p.add_argument("--out", default="artifacts/models/mvp")
     p.add_argument("--max-patients", type=int, default=300)
     p.add_argument("--max-visits", type=int, default=12)
-    p.add_argument("--epochs", type=int, default=15)
+    p.add_argument("--epochs", type=int, default=50)
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--hidden-dim", type=int, default=128)

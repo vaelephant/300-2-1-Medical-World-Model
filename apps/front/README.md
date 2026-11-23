@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HCC World Model Studio（Next.js）
 
-## Getting Started
+DR.SEEK 研究原型前端：Overview / Patients / World Model / Simulation / Evaluation。
 
-First, run the development server:
+## 前置
+
+1. 后端已启动并加载权重：
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 仓库根目录
+PYTHONPATH=. python scripts/serve_api.py --device cpu --port 8000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. 本目录依赖已安装（含 `recharts`）。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 启动
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd apps/front
+cp .env.local.example .env.local   # 如尚未配置
+npm run dev
+```
 
-## Learn More
+打开 http://localhost:3000
 
-To learn more about Next.js, take a look at the following resources:
+| 页面 | 作用 |
+|------|------|
+| `/` | API 状态、模型版本、mae_ex_afp 评估摘要 |
+| `/patients` | 合成患者列表与随访表 |
+| `/world-model` | 输入历史、未输入的后续观测与预测曲线；起点按实际 context 对齐 |
+| `/simulation` | 固定未来治疗条件，与延续上下文末次治疗对比 |
+| `/evaluation` | 已有测试集报告、逐特征误差和多步 rollout |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+顶栏始终显示 **RESEARCH ONLY** 条。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+UI 使用 Shadcn Base UI 组件，保留原有主题。模拟仅展示合成模型响应，不提供临床方案推荐。

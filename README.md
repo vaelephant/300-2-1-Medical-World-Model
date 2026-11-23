@@ -19,7 +19,7 @@ packages/world_model/    # Encoder / Dynamics / Decoder / Risk
 packages/training/       # 训练、评估、rollout、基线
 packages/imaging/        # 影像实验占位（可延后）
 configs/                 # data.yaml / model.yaml / train.yaml
-scripts/                 # CLI 入口占位
+scripts/                 # 数据生成、训练、评估及 API 启动入口
 tests/
 artifacts/               # 模型与导出（本地生成，勿提交大文件）
 reports/                 # 评估与数据报告
@@ -27,9 +27,11 @@ v-1/                     # 归档：旧 Medical World Model MVP
 项目文档/
 ```
 
-当前为 **空模块占位**：各 `.py` 仅有职责说明 docstring，业务代码自行编写。
+当前已实现合成病程、模型训练与评估、权重推理 API，以及五个前端页面。治疗模拟支持固定未来治疗条件，属于合成数据模型响应实验；影像、风险头训练和不确定性校准尚未完成。
 
-## 建议开发顺序
+快速启动见 [项目文档/0-快速启动.md](项目文档/0-快速启动.md)。
+
+## 主链路
 
 1. `packages/data/schemas.py` — 患者 / 观察 / 治疗 / 结局 Schema  
 2. `synthetic_generator.py` + `disease_simulator.py` — 合成轨迹  
@@ -47,13 +49,18 @@ pip install -r requirements.txt
 export PYTHONPATH=.
 ```
 
-前端（在 `apps/front` 为空时）：
+前端：
 
 ```bash
-cd apps
-npx create-next-app@latest front \
-  --typescript --tailwind --eslint --app --src-dir --use-npm
+cd apps/front
+npm install
+cp .env.local.example .env.local # 首次配置
+npm run dev
 ```
+
+页面：Overview / Patients / World Model / Simulation / Evaluation。
+
+预测使用前 `context_len` 次随访，从最后一个输入观测日开始；超过可用长度时按实际长度截断。后续观测仅供回顾比较。`/simulate` 接收 `treatment_modality` 与 `[0,1]` 的 `dose_intensity`，覆盖每个未来步的治疗向量，不修改历史。省略治疗类别时与 forecast 相同。该接口不验证因果疗效。
 
 ## 配置
 

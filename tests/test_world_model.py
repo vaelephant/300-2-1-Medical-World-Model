@@ -44,3 +44,16 @@ def test_rollout_finite():
         traj = model.rollout(batch, horizon=5, context_len=2)
     assert traj.shape[1] == 5
     assert torch.isfinite(traj).all()
+
+
+def test_untrained_residual_near_persistence():
+    """零初始化残差：未训练预测应接近 x_t（Persistence）。"""
+    batch, ds = _batch(4)
+    batch = ds.apply_normalizer_to_batch(batch)
+    model = HCCWorldModel(feature_dim=F, hidden_dim=32, latent_dim=32, residual=True)
+    model.eval()
+    with torch.no_grad():
+        pred = model(batch)["pred_features"]
+    persist = batch["features"][:, :-1, :]
+    # 允许极小数值差（dynamics 非零但 decoder 输出被零初始化）
+    assert torch.allclose(pred, persist, atol=1e-5)

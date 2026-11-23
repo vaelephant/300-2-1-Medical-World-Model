@@ -43,15 +43,18 @@ def main() -> None:
         report_path=report,
     )
     summary = {
-        "beats_persistence_mae": out["beats_persistence_mae"],
-        "beats_persistence_mae_macro": out["beats_persistence_mae_macro"],
         "beats_persistence_mae_ex_afp": out["beats_persistence_mae_ex_afp"],
-        "mae_wm": out["world_model"]["mae_mean"],
-        "mae_persistence": out["persistence"]["mae_mean"],
+        "mae_ex_afp_wm": out["world_model"]["mae_ex_afp"],
+        "mae_ex_afp_persistence": out["persistence"]["mae_ex_afp"],
+        "beats_persistence_mae_macro": out["beats_persistence_mae_macro"],
+        "beats_persistence_mae": out["beats_persistence_mae"],
         "mae_macro_wm": out["world_model"]["mae_macro"],
         "mae_macro_persistence": out["persistence"]["mae_macro"],
+        "mae_wm": out["world_model"]["mae_mean"],
+        "mae_persistence": out["persistence"]["mae_mean"],
         "report": str(report),
         "research_only": True,
+        "note": "主看 mae_ex_afp；mae_mean/macro 仍可能被 AFP 原始尺度主导",
     }
     print(json.dumps(summary, indent=2))
 

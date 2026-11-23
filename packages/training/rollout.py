@@ -17,6 +17,8 @@ def load_model(checkpoint: str | Path, device: str | torch.device = "cpu"):
     model = HCCWorldModel(
         hidden_dim=cfg["hidden_dim"],
         latent_dim=cfg["latent_dim"],
+        residual=bool(cfg.get("residual", True)),
+        multi_step=int(cfg.get("multi_step", 2)),
     )
     model.load_state_dict(ckpt["model"])
     model.to(device)
@@ -31,9 +33,10 @@ def rollout_batch(
     batch: Dict[str, Any],
     horizon: int = 6,
     context_len: int = 3,
+    future_treatment: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """返回原始特征空间的预测 (B, horizon, F)。"""
     b = dict(batch)
     b["features"] = normalizer.transform(batch["features"])
-    pred_norm = model.rollout(b, horizon=horizon, context_len=context_len)
+    pred_norm = model.rollout(b, horizon=horizon, context_len=context_len, future_treatment=future_treatment)
     return normalizer.inverse_transform(pred_norm)

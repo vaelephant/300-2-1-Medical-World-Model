@@ -1,69 +1,171 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  fetchEvaluations,
+  fetchHealth,
+  fetchModelMeta,
+  getApiBase,
+} from "@/lib/api";
+import type { EvalReport, ModelMeta } from "@/lib/types";
+
+export default function OverviewPage() {
+  const [health, setHealth] = useState<string>("checking…");
+  const [meta, setMeta] = useState<ModelMeta | null>(null);
+  const [evalReport, setEvalReport] = useState<EvalReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await fetchHealth();
+        if (cancelled) return;
+        setHealth(h.status);
+        const [m, e] = await Promise.all([fetchModelMeta(), fetchEvaluations()]);
+        if (cancelled) return;
+        setMeta(m);
+        setEvalReport(e);
+      } catch (err) {
+        if (cancelled) return;
+        setHealth("unreachable");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "无法连接 API。请先启动 scripts/serve_api.py",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const beat = evalReport?.beats_persistence_mae_ex_afp;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="space-y-8">
+      <section>
+        <h1 className="font-serif text-3xl font-semibold tracking-tight text-on-surface">
+          Overview
+        </h1>
+        <p className="mt-2 max-w-2xl text-sm text-on-surface-variant">
+          连接本地推理服务，查看模型版本与相对 Persistence 的合成数据评估。
+          API：<code className="rounded bg-surface-low px-1">{getApiBase()}</code>
+        </p>
+      </section>
+
+      {error ? (
+        <div className="rounded-lg border border-error/30 bg-error-container px-4 py-3 text-sm text-error">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Stat
+          label="API"
+          value={health}
+          tone={health === "ok" ? "ok" : "warn"}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+        <Stat
+          label="Model version"
+          value={meta?.model_version ?? "—"}
+          tone="neutral"
+        />
+        <Stat
+          label="Patients loaded"
+          value={meta ? String(meta.n_patients_loaded) : "—"}
+          tone="neutral"
+        />
+      </div>
+
+      <section className="rounded-lg border border-outline-variant/50 bg-surface-lowest p-5">
+        <h2 className="text-sm font-medium text-on-surface">Evaluation snapshot</h2>
+        <p className="mt-1 text-xs text-on-surface-variant">
+          主看 mae_ex_afp（去掉 AFP 原始尺度）；合成指标 ≠ 临床性能。
+        </p>
+        {evalReport?.available === false ? (
+          <p className="mt-4 text-sm text-on-surface-variant">
+            {evalReport.message ?? "无评估报告"}
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+        ) : (
+          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+            <Metric
+              name="beats_persistence_mae_ex_afp"
+              value={beat == null ? "—" : beat ? "true" : "false"}
+              ok={beat === true}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+            <Metric
+              name="mae_ex_afp (WM / Persistence)"
+              value={
+                evalReport?.world_model?.mae_ex_afp != null
+                  ? `${evalReport.world_model.mae_ex_afp.toFixed(2)} / ${evalReport.persistence?.mae_ex_afp?.toFixed(2) ?? "—"}`
+                  : "—"
+              }
+            />
+          </dl>
+        )}
+      </section>
+
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/patients"
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-on-primary"
+        >
+          浏览患者
+        </Link>
+        <Link
+          href="/world-model"
+          className="rounded-md border border-outline-variant bg-surface-lowest px-4 py-2 text-sm font-medium text-on-surface"
+        >
+          打开 World Model
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "ok" | "warn" | "neutral";
+}) {
+  const valueClass =
+    tone === "ok"
+      ? "text-tertiary"
+      : tone === "warn"
+        ? "text-amber-700"
+        : "text-on-surface";
+  return (
+    <div className="rounded-lg border border-outline-variant/50 bg-surface-lowest px-4 py-3">
+      <p className="text-xs text-on-surface-variant">{label}</p>
+      <p className={`mt-1 truncate font-medium ${valueClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function Metric({
+  name,
+  value,
+  ok,
+}: {
+  name: string;
+  value: string;
+  ok?: boolean;
+}) {
+  return (
+    <div className="rounded-md bg-surface-low px-3 py-2">
+      <dt className="text-xs text-on-surface-variant">{name}</dt>
+      <dd
+        className={`mt-0.5 text-sm font-medium ${ok ? "text-tertiary" : "text-on-surface"}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

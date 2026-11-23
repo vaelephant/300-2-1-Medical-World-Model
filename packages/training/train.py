@@ -136,7 +136,13 @@ def train_world_model(
     train_loader = make_loader(train_idx, True)
     val_loader = make_loader(val_idx, False)
 
-    model = HCCWorldModel(hidden_dim=hidden_dim, latent_dim=latent_dim).to(device)
+    model = HCCWorldModel(
+        hidden_dim=hidden_dim,
+        latent_dim=latent_dim,
+        multi_step=2,
+        multi_step_weight=0.5,
+        residual=True,
+    ).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr)
 
     history = []
@@ -176,10 +182,12 @@ def train_world_model(
                 "max_visits": max_visits,
                 "max_patients": max_patients,
                 "seed": seed,
-                "research_only": True,
-                "data_source": "synthetic",
-                "model_version": "hcc-wm-mvp-0.1",
-            },
+                        "research_only": True,
+                        "data_source": "synthetic",
+                        "model_version": "hcc-wm-mvp-0.2-residual",
+                        "residual": True,
+                        "multi_step": 2,
+                    },
             "train_idx": train_idx,
             "val_idx": val_idx,
             "test_idx": test_idx,
@@ -225,17 +233,20 @@ def train_world_model(
             meta["eval_report"] = str(report_path)
             meta["beats_persistence_mae"] = report.get("beats_persistence_mae")
             meta["beats_persistence_mae_macro"] = report.get("beats_persistence_mae_macro")
+            meta["beats_persistence_mae_ex_afp"] = report.get("beats_persistence_mae_ex_afp")
             meta["test_mae_wm"] = report["world_model"]["mae_mean"]
             meta["test_mae_persistence"] = report["persistence"]["mae_mean"]
             meta["test_mae_macro_wm"] = report["world_model"]["mae_macro"]
             meta["test_mae_macro_persistence"] = report["persistence"]["mae_macro"]
+            meta["test_mae_ex_afp_wm"] = report["world_model"]["mae_ex_afp"]
+            meta["test_mae_ex_afp_persistence"] = report["persistence"]["mae_ex_afp"]
             print(
                 json.dumps(
                     {
                         "eval": True,
-                        "beats_persistence_mae_macro": meta["beats_persistence_mae_macro"],
-                        "test_mae_macro_wm": meta["test_mae_macro_wm"],
-                        "test_mae_macro_persistence": meta["test_mae_macro_persistence"],
+                        "beats_persistence_mae_ex_afp": meta["beats_persistence_mae_ex_afp"],
+                        "test_mae_ex_afp_wm": meta["test_mae_ex_afp_wm"],
+                        "test_mae_ex_afp_persistence": meta["test_mae_ex_afp_persistence"],
                         "report": str(report_path),
                     }
                 ),
