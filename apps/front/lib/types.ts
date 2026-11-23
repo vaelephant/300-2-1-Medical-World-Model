@@ -102,6 +102,9 @@ export type TrainingHistoryPoint = {
   epoch: number;
   train_loss: number;
   val_loss: number;
+  /** 方向准确率（标准化空间，|真实变化| > direction_eps 的有效点上）。旧 train_meta 可能没有。 */
+  train_acc?: number | null;
+  val_acc?: number | null;
 };
 
 export type TrainingSplits = {
@@ -135,6 +138,14 @@ export type TrainingInfo = {
     mae_macro_persistence?: number | null;
   };
   note?: string;
+  config?: Record<string, unknown>;
+  data_manifest?: Record<string, unknown>;
+  epochs_configured?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_sec?: number | null;
+  num_workers?: number | null;
+  torch_version?: string | null;
   history?: TrainingHistoryPoint[];
 };
 

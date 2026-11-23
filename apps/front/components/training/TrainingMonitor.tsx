@@ -117,6 +117,14 @@ export function TrainingMonitor() {
   }
 
   const history = live?.history ?? [];
+  let latestValAcc: number | null = null;
+  for (const point of history) {
+    if (typeof point.val_acc === "number" && Number.isFinite(point.val_acc)) {
+      latestValAcc = point.val_acc;
+    }
+  }
+  const hasAcc = latestValAcc !== null;
+  const directionEps = typeof live?.config?.direction_eps === "number" ? live.config.direction_eps : null;
   const status = live?.status ?? "idle";
   const statusMeta = STATUS_META[status] ?? STATUS_META.idle;
   const stalled = Boolean(live?.stalled);
@@ -189,7 +197,7 @@ export function TrainingMonitor() {
 
       {live ? (
         <>
-          <section aria-label="训练状态" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section aria-label="训练状态" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-lg border border-outline-variant/50 bg-surface-lowest p-4">
               <p className="text-xs text-on-surface-variant">状态</p>
               <span className={cn("mt-1 inline-flex rounded-sm px-2 py-0.5 text-sm font-medium", statusMeta.className)}>
@@ -200,14 +208,23 @@ export function TrainingMonitor() {
             <Stat label="Epoch" value={`${live.epochs_trained ?? 0} / ${live.epochs_configured ?? "?"}`} hint={bestEpoch ? `best epoch ${bestEpoch}` : undefined} />
             <Stat label="Best val_loss" value={formatMetric(live.best_val)} hint={bestEpoch ? `第 ${bestEpoch} 个 epoch` : undefined} />
             <Stat label="耗时" value={formatDuration(live.duration_sec)} hint={`更新于 ${formatDateTime(live.updated_at ?? live.finished_at)}`} />
+            <Stat
+              label="Val 方向准确率"
+              value={hasAcc ? `${(latestValAcc! * 100).toFixed(1)}%` : "—"}
+              hint={hasAcc ? `direction_eps=${directionEps ?? 0.05}` : "旧记录无 acc 字段"}
+            />
           </section>
 
           <section className="rounded-lg border border-outline-variant/50 bg-surface-lowest p-4" aria-label="实时训练曲线">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <div>
-                <h2 className="text-base font-semibold">Train / Val Loss</h2>
+                <h2 className="text-base font-semibold">Train / Val Loss & Direction Accuracy</h2>
                 <p className="text-xs text-muted-foreground">
                   来源：{sourceLabel(live.source)}；自动刷新 {lastFetched ? formatDateTime(lastFetched.toISOString()) : "—"}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  acc = 方向准确率：在真实变化绝对值 &gt; {directionEps ?? 0.05}（标准化空间）的有效观测上，预测变化方向与真实一致的比例；
+                  不是分类准确率，也不是临床准确率。{hasAcc ? "" : " 当前记录没有 acc 字段（旧 train_meta 格式），重新训练后自动记录。"}
                 </p>
               </div>
               {bestEpoch ? <span className="text-xs text-muted-foreground">best epoch = {bestEpoch}</span> : null}
@@ -216,7 +233,7 @@ export function TrainingMonitor() {
               <div
                 className="h-80 w-full"
                 role="img"
-                aria-label={`训练/验证损失曲线，共 ${history.length} 个 epoch${bestEpoch ? `，最佳 epoch 为 ${bestEpoch}` : ""}`}
+                aria-label={`训练/验证损失与方向准确率曲线，共 ${history.length} 个 epoch${bestEpoch ? `，最佳 epoch 为 ${bestEpoch}` : ""}`}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={history} margin={{ top: 12, right: 16, left: 0, bottom: 8 }}>
@@ -228,7 +245,17 @@ export function TrainingMonitor() {
                       tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
                       label={{ value: "epoch", position: "insideBottom", offset: -2, fill: "var(--muted-foreground)", fontSize: 11 }}
                     />
-                    <YAxis tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} width={64} />
+                    <YAxis yAxisId="loss" tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} width={64} />
+                    {hasAcc ? (
+                      <YAxis
+                        yAxisId="acc"
+                        orientation="right"
+                        domain={[0, 1]}
+                        tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                        tickFormatter={(value: number) => `${Math.round(value * 100)}%`}
+                        width={48}
+                      />
+                    ) : null}
                     <Tooltip
                       contentStyle={{
                         background: "var(--popover)",
@@ -247,8 +274,21 @@ export function TrainingMonitor() {
                       />
                     ) : null}
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Line isAnimationActive={false} type="linear" dataKey="train_loss" name="train_loss" stroke="var(--chart-history)" strokeWidth={2} dot={false} connectNulls />
-                    <Line isAnimationActive={false} type="linear" dataKey="val_loss" name="val_loss" stroke="var(--chart-forecast)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
+                    <Line yAxisId="loss" isAnimationActive={false} type="linear" dataKey="train_loss" name="train_loss" stroke="var(--chart-history)" strokeWidth={2} dot={false} connectNulls />
+                    <Line yAxisId="loss" isAnimationActive={false} type="linear" dataKey="val_loss" name="val_loss" stroke="var(--chart-forecast)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
+                    {hasAcc ? (
+                      <Line
+                        yAxisId="acc"
+                        isAnimationActive={false}
+                        type="linear"
+                        dataKey="val_acc"
+                        name="val_acc (direction)"
+                        stroke="var(--chart-scenario-two)"
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                      />
+                    ) : null}
                   </LineChart>
                 </ResponsiveContainer>
               </div>

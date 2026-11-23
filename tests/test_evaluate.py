@@ -56,6 +56,11 @@ def test_train_then_evaluate_writes_report(tmp_path):
     assert meta["data_source"] == "synthetic"
     assert meta["data_manifest"]["exists"] is True
     assert meta["torch_version"]
+    assert meta["config"]["direction_eps"] == 0.05
+    for row in meta["history"]:
+        assert "train_acc" in row and "val_acc" in row
+        for value in (row["train_acc"], row["val_acc"]):
+            assert value is None or 0.0 <= value <= 1.0
     assert (out / "best.pt").exists()
     assert (out / "last.pt").exists()
     assert (out / "train_meta.json").exists()

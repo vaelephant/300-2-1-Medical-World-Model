@@ -33,6 +33,7 @@ def main() -> None:
     p.add_argument("--deterministic", action="store_true", help="cudnn deterministic / deterministic algorithms")
     p.add_argument("--patience", type=int, default=10, help="early stopping patience")
     p.add_argument("--model-version", default="hcc-wm-mvp-0.2-residual")
+    p.add_argument("--direction-eps", type=float, default=0.05, help="方向准确率的最小真实变化阈值（标准化空间）")
     p.add_argument("--no-eval", action="store_true", help="训练结束不跑 test 评估")
     args = p.parse_args()
 
@@ -56,6 +57,7 @@ def main() -> None:
         pin_memory=True if args.pin_memory else None,
         deterministic=args.deterministic,
         model_version=args.model_version,
+        direction_eps=args.direction_eps,
         run_eval=not args.no_eval,
     )
     print("done:", meta["checkpoint"], "best_val=", meta["best_val"], "best_epoch=", meta.get("best_epoch"))

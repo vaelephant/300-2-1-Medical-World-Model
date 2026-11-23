@@ -14,7 +14,7 @@ import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch.utils.data import DataLoader, Subset
@@ -125,11 +125,20 @@ def _run_epoch(
     optimizer: Optional[torch.optim.Optimizer],
     device: torch.device,
     grad_clip: float = 1.0,
-) -> float:
+    direction_eps: float = 0.05,
+) -> Tuple[float, Optional[float]]:
+    """返回 (平均 loss, 方向准确率)。
+
+    方向准确率定义：在「真实变化绝对值 > direction_eps（标准化空间）」的有效观测上，
+    预测变化方向与真实变化方向一致的比例。回归任务没有分类 accuracy，这个指标用于
+    观察模型是否学到病程方向（上升/下降），不是临床准确率。
+    """
     training = optimizer is not None
     model.train(training)
     total = 0.0
     n = 0
+    eligible = 0
+    correct = 0
     context = torch.enable_grad() if training else torch.inference_mode()
     with context:
         for batch in loader:
@@ -146,7 +155,26 @@ def _run_epoch(
                 optimizer.step()
             total += float(loss.detach().item())
             n += 1
-    return total / max(n, 1)
+
+            features = batch_t["features"]
+            pred = out.get("pred_features")
+            if (
+                isinstance(pred, torch.Tensor)
+                and pred.ndim == 3
+                and pred.shape[1] == features.shape[1] - 1
+            ):
+                current = features[:, :-1, :]
+                target = features[:, 1:, :]
+                valid = batch_t["pad_mask"][:, 1:] & batch_t["pad_mask"][:, :-1]
+                valid = valid.unsqueeze(-1) & (~batch_t["missing"][:, 1:])
+                true_delta = target - current
+                eligible_mask = valid & (true_delta.abs() > direction_eps)
+                pred_delta = pred - current
+                match = (torch.sign(pred_delta) == torch.sign(true_delta)) & eligible_mask
+                eligible += int(eligible_mask.sum().item())
+                correct += int(match.sum().item())
+    accuracy = (correct / eligible) if eligible > 0 else None
+    return total / max(n, 1), accuracy
 
 
 def _utc_now() -> str:
@@ -229,6 +257,7 @@ def train_world_model(
     deterministic: bool = False,
     model_version: str = DEFAULT_MODEL_VERSION,
     predict_uncertainty: bool = False,
+    direction_eps: float = 0.05,
     run_eval: bool = True,
 ) -> Dict[str, Any]:
     """端到端训练并保存 checkpoint / train_meta。"""
@@ -240,6 +269,8 @@ def train_world_model(
         raise ValueError(f"batch_size 必须 >= 1，实际 {batch_size}")
     if num_workers < 0:
         raise ValueError(f"num_workers 必须 >= 0，实际 {num_workers}")
+    if direction_eps < 0:
+        raise ValueError(f"direction_eps 必须 >= 0，实际 {direction_eps}")
 
     started_at = _utc_now()
     started_clock = time.perf_counter()
@@ -297,6 +328,7 @@ def train_world_model(
         "max_patients": max_patients,
         "seed": seed,
         "predict_uncertainty": bool(predict_uncertainty),
+        "direction_eps": direction_eps,
         "research_only": True,
         "data_source": data_source,
         "model_version": model_version,
@@ -336,20 +368,34 @@ def train_world_model(
     write_progress()
 
     for epoch in range(1, epochs + 1):
-        train_loss = _run_epoch(
-            model, train_loader, ds.apply_normalizer_to_batch, optim, device, grad_clip
+        train_loss, train_acc = _run_epoch(
+            model,
+            train_loader,
+            ds.apply_normalizer_to_batch,
+            optim,
+            device,
+            grad_clip,
+            direction_eps,
         )
         val_loss: Optional[float] = None
+        val_acc: Optional[float] = None
         if val_loader is not None:
-            val_loss = _run_epoch(
+            val_loss, val_acc = _run_epoch(
                 model,
                 val_loader,
                 ds.apply_normalizer_to_batch,
                 None,
                 device,
                 grad_clip,
+                direction_eps,
             )
-        row = {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss}
+        row = {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "train_acc": train_acc,
+            "val_acc": val_acc,
+        }
         history.append(row)
         print(json.dumps(row), flush=True)
 

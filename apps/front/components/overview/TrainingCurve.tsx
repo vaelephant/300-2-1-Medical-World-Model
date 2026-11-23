@@ -80,6 +80,15 @@ export function TrainingCurve({
       Number.isFinite(point.train_loss) &&
       Number.isFinite(point.val_loss),
   );
+  let latestValAcc: number | null = null;
+  for (const point of history) {
+    if (typeof point.val_acc === "number" && Number.isFinite(point.val_acc)) {
+      latestValAcc = point.val_acc;
+    }
+  }
+  const hasAcc = latestValAcc !== null;
+  const directionEps =
+    typeof training.config?.direction_eps === "number" ? training.config.direction_eps : null;
   const epochs = training.epochs_trained ?? history.length;
   const bestEpoch =
     typeof training.best_epoch === "number" && Number.isFinite(training.best_epoch)
@@ -130,13 +139,17 @@ export function TrainingCurve({
       title="训练曲线"
       description="读取 checkpoint 同目录 train_meta.json；不加载模型、不伪造曲线。"
     >
-      <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
         <MetricTile label="训练 epoch 数" value={formatMetric(epochs, 0)} />
         <MetricTile
           label="best_epoch（val_loss 最低）"
           value={bestEpoch === null ? "—" : `第 ${bestEpoch} epoch`}
         />
         <MetricTile label="best_val（history 最小值）" value={formatMetric(historyBestVal, 4)} />
+        <MetricTile
+          label="Val 方向准确率"
+          value={hasAcc ? `${(latestValAcc! * 100).toFixed(1)}%` : "—"}
+        />
         <MetricTile
           label="数据切分 train / val / test"
           value={
@@ -157,12 +170,15 @@ export function TrainingCurve({
         {bestValMismatch
           ? ` train_meta 记录的 best_val = ${formatMetric(reportedBestVal, 4)}，与 history 最小值不一致，请以 history 为准。`
           : ""}
+        {hasAcc
+          ? ` acc 为方向准确率（|真实变化| > ${directionEps ?? 0.05} 的有效点上，预测方向与真实一致的比例），不是分类/临床准确率。`
+          : " 当前记录没有 acc 字段（旧 train_meta 格式）；重新训练后会记录方向准确率。"}
       </p>
 
       <div
         className="mt-4 h-72 w-full"
         role="img"
-        aria-label={`训练损失曲线：共 ${formatMetric(epochs, 0)} 个 epoch，train_loss 与 val_loss 随 epoch 变化；val_loss 最低点为第 ${bestEpoch ?? "未知"} epoch。`}
+        aria-label={`训练损失与方向准确率曲线：共 ${formatMetric(epochs, 0)} 个 epoch，train_loss、val_loss 与 val_acc 随 epoch 变化；val_loss 最低点为第 ${bestEpoch ?? "未知"} epoch。`}
       >
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={history} margin={{ top: 12, right: 16, left: 0, bottom: 4 }}>
@@ -173,22 +189,43 @@ export function TrainingCurve({
               tickFormatter={(value: number) => `第 ${value} 轮`}
             />
             <YAxis
+              yAxisId="loss"
               width={58}
               tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
               tickFormatter={(value: number) => formatMetric(value, 3)}
             />
+            {hasAcc ? (
+              <YAxis
+                yAxisId="acc"
+                orientation="right"
+                domain={[0, 1]}
+                width={48}
+                tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
+                tickFormatter={(value: number) => `${Math.round(value * 100)}%`}
+              />
+            ) : null}
             <Tooltip
               contentStyle={TOOLTIP_STYLE}
               labelFormatter={(label) => `第 ${label} epoch`}
               formatter={(value, name) => [
-                formatMetric(typeof value === "number" ? value : Number(value), 4),
-                name === "train_loss" ? "训练损失 train_loss" : "验证损失 val_loss",
+                name === "val_acc"
+                  ? `${(Number(value) * 100).toFixed(1)}%`
+                  : formatMetric(typeof value === "number" ? value : Number(value), 4),
+                name === "train_loss"
+                  ? "训练损失 train_loss"
+                  : name === "val_loss"
+                    ? "验证损失 val_loss"
+                    : "方向准确率 val_acc",
               ]}
             />
             <Legend
               wrapperStyle={{ fontSize: 12 }}
               formatter={(value) =>
-                value === "train_loss" ? "训练损失 train_loss" : "验证损失 val_loss"
+                value === "train_loss"
+                  ? "训练损失 train_loss"
+                  : value === "val_loss"
+                    ? "验证损失 val_loss"
+                    : "方向准确率 val_acc"
               }
             />
             {bestEpoch !== null ? (
@@ -205,6 +242,7 @@ export function TrainingCurve({
               />
             ) : null}
             <Line
+              yAxisId="loss"
               isAnimationActive={false}
               type="monotone"
               dataKey="train_loss"
@@ -214,6 +252,7 @@ export function TrainingCurve({
               dot={false}
             />
             <Line
+              yAxisId="loss"
               isAnimationActive={false}
               type="monotone"
               dataKey="val_loss"
@@ -222,6 +261,19 @@ export function TrainingCurve({
               strokeWidth={2}
               dot={{ r: 2 }}
             />
+            {hasAcc ? (
+              <Line
+                yAxisId="acc"
+                isAnimationActive={false}
+                type="monotone"
+                dataKey="val_acc"
+                name="val_acc"
+                stroke="var(--chart-scenario-two)"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+              />
+            ) : null}
           </LineChart>
         </ResponsiveContainer>
       </div>
