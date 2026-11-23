@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { PatientTimeline } from "@/components/PatientTimeline";
+import { buttonVariants } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { fetchPatient, fetchPatients } from "@/lib/api";
 import type { PatientSummary, PatientTrajectory } from "@/lib/types";
@@ -11,6 +13,7 @@ export default function PatientsPage() {
   const [traj, setTraj] = useState<PatientTrajectory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [context, setContext] = useState(3);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +54,10 @@ export default function PatientsPage() {
     };
   }, [selected]);
 
+  const clampedContext = traj ? Math.min(Math.max(context, 1), traj.visits.length) : context;
+  const selectedVisit = traj && traj.visits.length > 0 ? traj.visits[clampedContext - 1] : null;
+  const remainingVisits = traj ? Math.max(traj.visits.length - clampedContext, 0) : 0;
+
   return (
     <div className="space-y-6">
       <div>
@@ -75,7 +82,7 @@ export default function PatientsPage() {
               <li key={p.patient_id}>
                 <button
                   type="button"
-                  onClick={() => setSelected(p.patient_id)}
+                  onClick={() => { setTraj(null); setError(null); setContext(3); setSelected(p.patient_id); }}
                   className={
                     selected === p.patient_id
                       ? "w-full rounded-md bg-primary-container px-3 py-2 text-left text-sm text-primary"
@@ -91,7 +98,7 @@ export default function PatientsPage() {
             ))}
           </ul>
 
-          <div className="space-y-4">
+          <div className="flex min-w-0 flex-col gap-4">
             {traj ? (
               <>
                 <div className="rounded-lg border border-outline-variant/50 bg-surface-lowest p-4">
@@ -104,10 +111,10 @@ export default function PatientsPage() {
                       </p>
                     </div>
                     <Link
-                      href={`/world-model?patient=${traj.patient.patient_id}`}
-                      className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-on-primary"
+                      href={`/world-model?patient=${traj.patient.patient_id}&context=${clampedContext}`}
+                      className={buttonVariants()}
                     >
-                      Forecast
+                      从所选起点开始预测
                     </Link>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -116,45 +123,25 @@ export default function PatientsPage() {
                     <Badge>synthetic</Badge>
                     <Badge>research_only</Badge>
                   </div>
+                  {selectedVisit ? (
+                    <div className="mt-3 rounded-md border border-primary/30 bg-primary-container/60 px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="font-medium text-primary">预测输入：前 {clampedContext} 次随访</span>
+                        <span className="text-on-surface-variant">· 起点 Day {selectedVisit.observation.days_from_index}</span>
+                        <span className="text-on-surface-variant">
+                          {remainingVisits > 0
+                            ? `· 之后 ${remainingVisits} 次随访为“后续观测（未输入）”，仅作回顾对照`
+                            : "· 已是最后一次随访，没有后续观测"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-on-surface-variant">
+                        在下方时间轴点击节点即可更改预测起点；再点“从所选起点开始预测”进入 World Model。
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="overflow-auto rounded-lg border border-outline-variant/50 bg-surface-lowest">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-surface-low text-xs text-on-surface-variant">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">Day</th>
-                        <th className="px-3 py-2 font-medium">AFP</th>
-                        <th className="px-3 py-2 font-medium">Tumor cm</th>
-                        <th className="px-3 py-2 font-medium">Albumin</th>
-                        <th className="px-3 py-2 font-medium">Treatment</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {traj.visits.map((v) => (
-                        <tr
-                          key={v.observation.visit_index}
-                          className="border-t border-outline-variant/40"
-                        >
-                          <td className="px-3 py-2">
-                            {v.observation.days_from_index}
-                          </td>
-                          <td className="px-3 py-2">
-                            {v.observation.features.afp?.toFixed(1)}
-                          </td>
-                          <td className="px-3 py-2">
-                            {v.observation.features.tumor_size_cm?.toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2">
-                            {v.observation.features.albumin?.toFixed(1)}
-                          </td>
-                          <td className="px-3 py-2 text-on-surface-variant">
-                            {v.treatments[0]?.modality ?? "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <PatientTimeline trajectory={traj} context={clampedContext} maxContext={Math.min(traj.visits.length, 12)} revealed onSelect={setContext} />
               </>
             ) : (
               <p className="text-sm text-on-surface-variant">选择左侧患者</p>

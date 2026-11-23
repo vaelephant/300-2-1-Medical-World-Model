@@ -1,0 +1,61 @@
+{
+  "source": {
+    "cohort": "artifacts/synthetic（本地合成 HCC 队列，scripts/generate_data.py --seed 42，n=1000）",
+    "n_patients": 1000,
+    "selection": "先按 BCLC 分期、已记录治疗类型、完整 12 次随访初筛，再按病程形态（治疗后应答 / 稳定 / 进展）人工挑选；未参考模型预测误差或测试集指标。",
+    "validation": "artifacts/ 为本地生成产物，重新生成数据后患者 ID 可能变化。运行 python -m pytest tests/test_demo_cases.py -q 校验本文件与当前队列一致。",
+    "doc": "项目文档/4-演示流程.md"
+  },
+  "cases": [
+    {
+      "patientId": "SYN00733",
+      "title": "消融后进展 · BCLC A",
+      "stage": "A",
+      "reason": "前 3 次随访内两次消融记录（Day 31、Day 111），随后肿瘤直径与 AFP 上升，适合讲治疗事件与指标变化的关联。",
+      "focus": "治疗事件 → 指标变化",
+      "context": 3,
+      "horizon": 4,
+      "treatments": ["ablation", "none"]
+    },
+    {
+      "patientId": "SYN00623",
+      "title": "TACE 后进展 · BCLC B",
+      "stage": "B",
+      "reason": "索引日有 TACE 记录、Child-Pugh B，肿瘤负荷与肝功能同时恶化；停在第 4 次随访（Day 198）后预测，后续观测仍持续进展，适合展示中晚期病例的多指标变化。",
+      "focus": "肿瘤负荷 + 肝功能",
+      "context": 4,
+      "horizon": 4,
+      "treatments": ["tace", "systemic"]
+    },
+    {
+      "patientId": "SYN00119",
+      "title": "系统治疗下进展 · BCLC C",
+      "stage": "C",
+      "reason": "前两次随访有系统治疗记录（Day 0、Day 117），随后 AFP 与肿瘤直径持续上升，适合比较继续系统治疗与支持治疗。",
+      "focus": "系统治疗 vs 支持治疗",
+      "context": 3,
+      "horizon": 4,
+      "treatments": ["systemic", "palliative"]
+    },
+    {
+      "patientId": "SYN00364",
+      "title": "TACE 应答后稳定 · BCLC B",
+      "stage": "B",
+      "reason": "连续 TACE 后肿瘤直径从 4.8 cm 降至 2.5 cm 并趋稳；停在第 4 次随访（Day 249）后预测，后续观测仍维持平台期，适合展示治疗应答期的预测与回顾对照。",
+      "focus": "应答与平台期",
+      "context": 4,
+      "horizon": 4,
+      "treatments": ["tace", "systemic", "none"]
+    },
+    {
+      "patientId": "SYN00614",
+      "title": "局部治疗后复发 · BCLC A",
+      "stage": "A",
+      "reason": "消融/切除记录后一度稳定，Day 277 起肿瘤直径明显加速增大（6.6→15.1 cm），用于展示早期分期病例的复发进展，与稳定病例形成对照；也可观察模型对复发风险的偏差。",
+      "focus": "复发与进展（偏差示例）",
+      "context": 3,
+      "horizon": 4,
+      "treatments": ["ablation", "tace", "none"]
+    }
+  ]
+}
