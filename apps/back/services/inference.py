@@ -145,6 +145,7 @@ class InferenceService:
                 dataset[i]["patient_id"]: i for i in range(len(dataset))
             }
             self._traj_cache = {}
+            self._latent_cache = None
             self._dataset = dataset_summary(self.data_dir)
             self.data_source = self._dataset.get("data_source") or "unknown"
             self._max_patients = cap
@@ -368,6 +369,160 @@ class InferenceService:
             "history_days": hist_days,
             "predictions": predictions,
             "note": "研究原型输出，非临床结论；轨迹来自合成数据动力学学习。",
+        }
+
+    # ------------------------------------------------------------------
+    def _latent_pca(self) -> Dict[str, Any]:
+        """在全部患者末次 latent 上拟合 PCA(2)，并缓存队列投影点。
+
+        latent 轴没有临床含义；这里只用于探索 encoder 的状态空间。
+        """
+        cached = getattr(self, "_latent_cache", None)
+        if cached is not None:
+            return cached
+
+        items = []
+        metadata = []
+        for pid in self._id_to_idx:
+            traj = self.get_trajectory(pid)
+            tensors = trajectory_to_tensors(
+                traj, max_visits=int(self.config.get("max_visits", 12))
+            )
+            if tensors["length"].item() == 0:
+                continue
+            items.append(tensors)
+            patient = traj.patient
+            metadata.append(
+                {
+                    "patient_id": pid,
+                    "bclc_stage": getattr(patient.bclc_stage, "value", str(patient.bclc_stage)),
+                    "child_pugh": getattr(patient.child_pugh, "value", str(patient.child_pugh)),
+                    "sex": getattr(patient.sex, "value", str(patient.sex)),
+                    "age_at_index": patient.age_at_index,
+                    "n_visits": len(traj.visits),
+                    "last_day": int(traj.visits[-1].observation.days_from_index),
+                }
+            )
+        if not items:
+            raise RuntimeError("没有可编码的患者轨迹")
+
+        batch = collate_trajectories(items)
+        batch = {
+            k: (v.to(self.device) if torch.is_tensor(v) else v) for k, v in batch.items()
+        }
+        x_in = self.model.build_input(
+            batch["features"], batch["missing"], batch["delta_t"], batch["treatment"]
+        )
+        with torch.inference_mode():
+            _, z_seq = self.model.encoder(x_in)
+            z_last = z_seq[:, -1, :].float().cpu()
+        mean = z_last.mean(dim=0)
+        centered = z_last - mean
+        _, singular, vh = torch.linalg.svd(centered, full_matrices=False)
+        components = vh[:2]
+        coords = centered @ components.T
+        total_var = float((singular ** 2).sum().item()) or 1.0
+        explained = [(float(singular[i] ** 2) / total_var) for i in range(min(2, len(singular)))]
+        cohort = []
+        for index, meta in enumerate(metadata):
+            cohort.append(
+                {
+                    **meta,
+                    "x": float(coords[index, 0]),
+                    "y": float(coords[index, 1]),
+                }
+            )
+        cache = {
+            "mean": mean,
+            "components": components,
+            "explained_variance": explained,
+            "cohort": cohort,
+            "cohort_by_id": {row["patient_id"]: row for row in cohort},
+        }
+        self._latent_cache = cache
+        return cache
+
+    def _project_latent(self, z: torch.Tensor, cache: Dict[str, Any]) -> torch.Tensor:
+        z = z.detach().float().cpu()
+        return (z - cache["mean"]) @ cache["components"].T
+
+    def latent_patient(self, patient_id: str, horizon: int = 4) -> Dict[str, Any]:
+        """返回全队列 latent PCA 散点 + 指定患者的观测轨迹/预测轨迹投影。"""
+        cache = self._latent_pca()
+        traj = self.get_trajectory(patient_id)
+        tensors = trajectory_to_tensors(
+            traj, max_visits=int(self.config.get("max_visits", 12))
+        )
+        if tensors["length"].item() == 0:
+            raise ValueError("患者没有可用随访")
+        batch = collate_trajectories([tensors])
+        batch = {
+            k: (v.to(self.device) if torch.is_tensor(v) else v) for k, v in batch.items()
+        }
+        self.model.eval()
+        x_in = self.model.build_input(
+            batch["features"], batch["missing"], batch["delta_t"], batch["treatment"]
+        )
+        with torch.inference_mode():
+            _, z_seq = self.model.encoder(x_in)
+            z_seq_cpu = z_seq[0].float().cpu()
+            projected = self._project_latent(z_seq_cpu, cache)
+            last_z = z_seq[0, -1, :]
+            action = batch["treatment"][0, -1, :]
+            delta_t = batch["delta_t"][0, 1:]
+            step_days = float(delta_t.mean().item()) if delta_t.numel() > 0 else 30.0
+            z = last_z.unsqueeze(0)
+            action = action.unsqueeze(0)
+            dt = torch.tensor([step_days], device=self.device, dtype=z.dtype)
+            future_z = []
+            for _ in range(horizon):
+                z = self.model.dynamics(z, action, dt)
+                future_z.append(z[0].float().cpu())
+            future_projected = self._project_latent(torch.stack(future_z), cache)
+
+        days = [int(visit.observation.days_from_index) for visit in traj.visits]
+        observed = [
+            {
+                "step": index + 1,
+                "day": days[index],
+                "x": float(projected[index, 0]),
+                "y": float(projected[index, 1]),
+            }
+            for index in range(len(days))
+        ]
+        last_day = days[-1]
+        forecast = [
+            {
+                "step": index + 1,
+                "day": float(last_day + step_days * (index + 1)),
+                "x": float(future_projected[index, 0]),
+                "y": float(future_projected[index, 1]),
+            }
+            for index in range(horizon)
+        ]
+        return {
+            "available": True,
+            "patient_id": patient_id,
+            "research_only": True,
+            "data_source": self.data_source,
+            "horizon": horizon,
+            "step_days": step_days,
+            "pca": {
+                "n_components": 2,
+                "explained_variance": cache["explained_variance"],
+                "n_patients": len(cache["cohort"]),
+                "note": (
+                    "PCA 仅用于把 encoder latent 投到二维；坐标轴无临床含义，"
+                    "不是生物标志物，也不是生存/风险预测。"
+                ),
+            },
+            "cohort": cache["cohort"],
+            "observed": observed,
+            "forecast": forecast,
+            "note": (
+                "observed 为历史访视的 latent 投影；forecast 用末次治疗条件与平均步长做 latent rollout，"
+                "仅展示模型内部状态走向，不代表疗效或临床轨迹。"
+            ),
         }
 
     def cohort_summary(self) -> Dict[str, Any]:

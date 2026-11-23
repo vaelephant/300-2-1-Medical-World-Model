@@ -316,3 +316,50 @@ export type CohortSummaryResponse = {
   note?: string;
   message?: string;
 };
+
+// ---------------------------------------------------------------------------
+// Latent 潜在空间（/api/v1/latent/{patient_id}）：encoder latent 的 PCA 投影。
+// 坐标为模型内部状态，无临床含义，不是生物标志物/风险预测。
+// ---------------------------------------------------------------------------
+
+export type LatentPca = {
+  n_components?: number;
+  /** 每个主成分的解释方差比例，例如 [0.285, 0.128]。 */
+  explained_variance?: number[];
+  n_patients?: number;
+  note?: string;
+};
+
+export type LatentCohortPoint = {
+  patient_id: string;
+  bclc_stage?: string;
+  child_pugh?: string;
+  sex?: string;
+  age_at_index?: number;
+  n_visits?: number;
+  last_day?: number | null;
+  x: number;
+  y: number;
+};
+
+export type LatentPoint = {
+  step: number;
+  day: number;
+  x: number;
+  y: number;
+};
+
+export type LatentResponse = {
+  available?: boolean;
+  patient_id?: string;
+  research_only?: boolean;
+  data_source?: string;
+  horizon?: number;
+  step_days?: number | null;
+  pca?: LatentPca;
+  cohort?: LatentCohortPoint[];
+  observed?: LatentPoint[];
+  forecast?: LatentPoint[];
+  note?: string;
+  message?: string;
+};

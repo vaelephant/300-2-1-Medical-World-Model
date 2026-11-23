@@ -274,3 +274,21 @@ def test_cohort_summary_endpoint(client):
     assert sum(aggregate["stage_counts"].values()) == body["n_patients"]
     assert "progression_days" in aggregate
     assert "不是风险模型" in body["note"]
+
+
+def test_latent_endpoint(client):
+    pid = client.get("/api/v1/patients?limit=1").json()["patients"][0]["patient_id"]
+    response = client.get(f"/api/v1/latent/{pid}", params={"horizon": 3})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["research_only"] is True
+    assert body["patient_id"] == pid
+    assert body["horizon"] == 3
+    assert len(body["cohort"]) >= 1
+    assert len(body["observed"]) >= 1
+    assert len(body["forecast"]) == 3
+    for point in body["observed"] + body["forecast"]:
+        assert isinstance(point["x"], float) and isinstance(point["y"], float)
+    assert len(body["pca"]["explained_variance"]) >= 1
+    assert "无临床含义" in body["pca"]["note"]
+    assert client.get("/api/v1/latent/missing").status_code == 404

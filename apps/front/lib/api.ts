@@ -4,6 +4,7 @@ import type {
   EvalReport,
   EvaluationReportsResponse,
   ForecastResponse,
+  LatentResponse,
   ModelMeta,
   PatientSummary,
   PatientTrajectory,
@@ -101,6 +102,16 @@ export async function fetchTrainingLive() {
 /** 全队列汇总（一次返回全部合成患者 + aggregate 描述统计）；用于 /cohort 探索页。 */
 export async function fetchCohortSummary() {
   return getJson<CohortSummaryResponse>("/api/v1/cohort/summary");
+}
+
+/**
+ * Latent 潜在空间：队列 PCA 投影 + 指定患者的 observed / forecast 路径。
+ * 返回约 1000 个队列点（~170KB），由后端缓存 PCA。
+ */
+export async function fetchLatent(patientId: string, horizon = 3) {
+  return getJson<LatentResponse>(
+    `/api/v1/latent/${encodeURIComponent(patientId)}?horizon=${horizon}`,
+  );
 }
 
 /** 重新加载磁盘上的 checkpoint，让新训练权重立即生效。 */

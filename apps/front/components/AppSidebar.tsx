@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   ScatterChart,
   Users,
+  Waypoints,
   type LucideIcon,
 } from "lucide-react"
 
@@ -58,6 +59,7 @@ export const navGroups: NavGroup[] = [
       { href: "/world-model", label: "病程预测", icon: Activity },
       { href: "/simulation", label: "治疗情景", icon: FlaskConical },
       { href: "/training", label: "训练监控", icon: ChartLine },
+      { href: "/latent", label: "潜在空间", icon: Waypoints },
     ],
   },
   {

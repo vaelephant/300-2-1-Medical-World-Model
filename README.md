@@ -58,7 +58,7 @@ cp .env.local.example .env.local # 首次配置
 npm run dev
 ```
 
-页面：英文路由 Overview / Patients / World Model / Simulation / Evaluation，侧边栏对应中文功能项「演示总览 / 患者病程 / 队列探索 / 病程预测 / 治疗情景 / 训练监控 / 模型评估」；`/world-model` 定起点并预测，`/simulation` 做同起点情景比较与回顾对照。  
+页面：英文路由 Overview / Patients / World Model / Simulation / Evaluation，侧边栏对应中文功能项「演示总览 / 患者病程 / 队列探索 / 病程预测 / 治疗情景 / 训练监控 / 潜在空间 / 模型评估」；`/world-model` 定起点并预测，`/simulation` 做同起点情景比较与回顾对照。  
 3–5 分钟演示脚本（5 个精选病例、参数解释、边界话术）见 [项目文档/4-演示流程.md](项目文档/4-演示流程.md)。
 
 预测使用前 `context_len` 次随访，从最后一个输入观测日开始；超过可用长度时按实际长度截断。后续观测仅供回顾比较。`/simulate` 接收 `treatment_modality` 与 `[0,1]` 的 `dose_intensity`，覆盖每个未来步的治疗向量，不修改历史。省略治疗类别时与 forecast 相同。该接口不验证因果疗效。
