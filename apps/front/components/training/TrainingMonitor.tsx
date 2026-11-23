@@ -14,8 +14,8 @@ import {
   YAxis,
 } from "recharts";
 
-import { fetchTrainingLive, reloadModelCheckpoint } from "@/lib/api";
-import type { ModelReloadResponse, TrainingLiveResponse } from "@/lib/types";
+import { fetchModelMeta, fetchTrainingLive, reloadModelCheckpoint } from "@/lib/api";
+import type { ModelMeta, ModelReloadResponse, TrainingLiveResponse } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -65,6 +65,7 @@ export function TrainingMonitor() {
   const [reloading, setReloading] = useState(false);
   const [reloadResult, setReloadResult] = useState<ModelReloadResponse | null>(null);
   const [reloadError, setReloadError] = useState<string | null>(null);
+  const [servingMeta, setServingMeta] = useState<ModelMeta | null>(null);
   const cancelled = useRef(false);
   const requestId = useRef(0);
 
@@ -109,6 +110,10 @@ export function TrainingMonitor() {
       const result = await reloadModelCheckpoint(true);
       setReloadResult(result);
       await load();
+      // reload 后同步拉取 /api/v1/models，确认服务端当前版本；失败不影响 reload 结果展示。
+      fetchModelMeta()
+        .then((meta) => setServingMeta(meta))
+        .catch(() => setServingMeta(null));
     } catch (err) {
       setReloadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -197,13 +202,16 @@ export function TrainingMonitor() {
 
       {live ? (
         <>
-          <section aria-label="训练状态" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <section aria-label="训练状态" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
             <div className="rounded-lg border border-outline-variant/50 bg-surface-lowest p-4">
               <p className="text-xs text-on-surface-variant">状态</p>
               <span className={cn("mt-1 inline-flex rounded-sm px-2 py-0.5 text-sm font-medium", statusMeta.className)}>
                 {statusMeta.label}
               </span>
               <p className="mt-1 text-xs text-muted-foreground">{sourceLabel(live.source)}</p>
+              {checkpointChanged ? (
+                <p className="mt-1 text-[11px] font-medium text-warning">磁盘权重已更新，待 reload</p>
+              ) : null}
             </div>
             <Stat label="Epoch" value={`${live.epochs_trained ?? 0} / ${live.epochs_configured ?? "?"}`} hint={bestEpoch ? `best epoch ${bestEpoch}` : undefined} />
             <Stat label="Best val_loss" value={formatMetric(live.best_val)} hint={bestEpoch ? `第 ${bestEpoch} 个 epoch` : undefined} />
@@ -212,6 +220,11 @@ export function TrainingMonitor() {
               label="Val 方向准确率"
               value={hasAcc ? `${(latestValAcc! * 100).toFixed(1)}%` : "—"}
               hint={hasAcc ? `direction_eps=${directionEps ?? 0.05}` : "旧记录无 acc 字段"}
+            />
+            <Stat
+              label="Device / 数据来源"
+              value={live.device ?? "—"}
+              hint={manifest?.data_source ?? (typeof live.config?.data_source === "string" ? live.config.data_source : "—")}
             />
           </section>
 
@@ -341,6 +354,14 @@ export function TrainingMonitor() {
                   <dt className="shrink-0 text-muted-foreground">last checkpoint</dt>
                   <dd className="max-w-[70%] truncate font-mono text-xs" title={live.last_checkpoint ?? undefined}>{live.last_checkpoint ?? "—"}</dd>
                 </div>
+                {servingMeta ? (
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="shrink-0 text-muted-foreground">推理服务版本（reload 后确认）</dt>
+                    <dd className="max-w-[70%] truncate font-mono text-xs" title={servingMeta.checkpoint}>
+                      {servingMeta.model_version} · {servingMeta.device}
+                    </dd>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap justify-between gap-2">
                   <dt className="shrink-0 text-muted-foreground">eval report</dt>
                   <dd className="max-w-[70%] truncate font-mono text-xs" title={live.eval_report ?? undefined}>{live.eval_report ?? "—"}</dd>
