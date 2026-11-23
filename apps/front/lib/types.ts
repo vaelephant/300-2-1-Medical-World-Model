@@ -402,3 +402,33 @@ export type TreatmentResponseResponse = {
   note?: string;
   message?: string;
 };
+
+// ---------------------------------------------------------------------------
+// 模型 schema/config（/api/v1/schema）：按当前 checkpoint 的 config 派生，
+// 用于 /architecture 数据流示意；字段缺失时前端显示 —，不猜测。
+// ---------------------------------------------------------------------------
+
+export type ModelSchema = {
+  clinical_features: string[];
+  treatment_modalities: string[];
+  feature_dim: number;
+  treatment_dim: number;
+  treatment_dim_note?: string;
+  encoder_input_dim: number;
+  hidden_dim: number;
+  latent_dim: number;
+  dropout?: number | null;
+  residual?: boolean;
+  multi_step?: number | null;
+  multi_step_weight?: number | null;
+  max_visits?: number | null;
+  /** 训练子集上限，不是推理端加载患者数（后端有明确说明）。 */
+  training_max_patients?: number | null;
+  model_version?: string;
+  device?: string;
+  data_source?: string;
+  research_only?: boolean;
+  note?: string;
+  available?: boolean;
+  message?: string;
+};

@@ -6,6 +6,7 @@ import type {
   ForecastResponse,
   LatentResponse,
   ModelMeta,
+  ModelSchema,
   PatientSummary,
   PatientTrajectory,
   ModelReloadResponse,
@@ -133,6 +134,11 @@ export async function fetchEvaluationReport(reportName: string) {
   return getJson<EvalReport>(
     `/api/v1/evaluations?report=${encodeURIComponent(reportName)}`,
   );
+}
+
+/** 模型 schema/config（/api/v1/schema）：feature/treatment 维度、encoder 输入、hidden/latent 等。 */
+export async function fetchModelSchema() {
+  return getJson<ModelSchema>("/api/v1/schema");
 }
 
 export async function fetchSimulation(patientId: string, horizon: number, contextLen: number, modality: string, dose: number) {

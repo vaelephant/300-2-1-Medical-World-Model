@@ -10,8 +10,38 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from apps.back.services.inference import get_service
+from packages.data.dataset import FEATURE_DIM, TREATMENT_DIM, TREATMENT_MODALITIES
+from packages.data.schemas import CLINICAL_FEATURE_KEYS
 
 router = APIRouter(prefix="/api/v1", tags=["metadata"])
+
+
+@router.get("/schema")
+def schema():
+    """模型输入/输出 schema 与当前 checkpoint 的结构超参（供模型结构页使用）。"""
+    svc = get_service()
+    config = svc.config
+    return {
+        "clinical_features": list(CLINICAL_FEATURE_KEYS),
+        "treatment_modalities": list(TREATMENT_MODALITIES),
+        "feature_dim": FEATURE_DIM,
+        "treatment_dim": TREATMENT_DIM,
+        "treatment_dim_note": "9 个治疗类别 one-hot + 1 维 dose_intensity",
+        "encoder_input_dim": FEATURE_DIM * 2 + 1 + TREATMENT_DIM,
+        "hidden_dim": config.get("hidden_dim"),
+        "latent_dim": config.get("latent_dim"),
+        "dropout": config.get("dropout"),
+        "residual": config.get("residual", True),
+        "multi_step": config.get("multi_step"),
+        "multi_step_weight": config.get("multi_step_weight"),
+        "max_visits": config.get("max_visits"),
+        "training_max_patients": config.get("max_patients"),
+        "model_version": svc.model_version,
+        "device": str(svc.device),
+        "data_source": svc.data_source,
+        "research_only": True,
+        "note": "training_max_patients 是训练子集上限，不是推理端加载的患者数。",
+    }
 
 
 @router.get("/provenance")

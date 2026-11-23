@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   FlaskConical,
   LayoutDashboard,
+  Network,
   ScatterChart,
   Syringe,
   Users,
@@ -66,7 +67,10 @@ export const navGroups: NavGroup[] = [
   },
   {
     label: "模型证据",
-    items: [{ href: "/evaluation", label: "模型评估", icon: ClipboardCheck }],
+    items: [
+      { href: "/architecture", label: "模型结构", icon: Network },
+      { href: "/evaluation", label: "模型评估", icon: ClipboardCheck },
+    ],
   },
 ]
 

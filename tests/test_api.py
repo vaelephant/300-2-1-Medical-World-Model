@@ -310,3 +310,15 @@ def test_treatment_response_endpoint(client):
         stat = tace["features"][key]
         assert "n_pairs" in stat and "median_delta" in stat and "median_pct" in stat
     assert "不能" in body["note"] or "不是因果" in body["note"]
+
+
+def test_schema_endpoint(client):
+    body = client.get("/api/v1/schema").json()
+    assert body["feature_dim"] == 10
+    assert body["treatment_dim"] == 10
+    assert len(body["clinical_features"]) == body["feature_dim"]
+    assert len(body["treatment_modalities"]) == 9
+    assert body["encoder_input_dim"] == 10 * 2 + 1 + 10
+    assert body["hidden_dim"] and body["latent_dim"]
+    assert body["research_only"] is True
+    assert "不是推理端" in body["note"]
