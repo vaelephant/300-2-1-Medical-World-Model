@@ -11,6 +11,7 @@ import type {
   ModelReloadResponse,
   TrainingInfo,
   TrainingLiveResponse,
+  TreatmentResponseResponse,
 } from "./types";
 
 const API_BASE =
@@ -119,6 +120,18 @@ export async function reloadModelCheckpoint(force = true) {
   return postJson<ModelReloadResponse>(
     `/api/v1/models/reload?force=${force ? "true" : "false"}`,
     {},
+  );
+}
+
+/** 治疗响应矩阵：治疗事件前后相邻随访的描述性变化（非因果、不排序治疗）。 */
+export async function fetchTreatmentResponse() {
+  return getJson<TreatmentResponseResponse>("/api/v1/treatment-response");
+}
+
+/** 按文件名读取某份完整评估报告（reports/ 下的 .json；文件名来自 /evaluations/reports）。 */
+export async function fetchEvaluationReport(reportName: string) {
+  return getJson<EvalReport>(
+    `/api/v1/evaluations?report=${encodeURIComponent(reportName)}`,
   );
 }
 

@@ -80,15 +80,21 @@ export type EvalReport = {
   rollout?: { context_len: number; horizons: Record<string, Metrics> };
   available?: boolean;
   research_only?: boolean;
+  beats_persistence_mae?: boolean;
+  beats_persistence_mae_macro?: boolean;
   beats_persistence_mae_ex_afp?: boolean;
   world_model?: Metrics;
   persistence?: Metrics;
   model_version?: string;
+  checkpoint?: string;
+  report_file?: string;
+  mae_improvement?: number;
+  mae_macro_improvement?: number;
   note?: string;
   message?: string;
 };
 
-export type Metrics = { mae_mean?: number; mae_ex_afp?: number; mae_macro?: number; mae_per_feature?: Record<string, number>; rmse_per_feature?: Record<string, number> };
+export type Metrics = { mae_mean?: number; mae_ex_afp?: number; mae_macro?: number; rmse_mean?: number; n_valid?: number; mae_per_feature?: Record<string, number>; rmse_per_feature?: Record<string, number> };
 
 /** 磁盘产物的存在性 / 大小 / 修改时间（/api/v1/training 内的 artifact_file）。 */
 export type ArtifactFile = {
@@ -360,6 +366,39 @@ export type LatentResponse = {
   cohort?: LatentCohortPoint[];
   observed?: LatentPoint[];
   forecast?: LatentPoint[];
+  note?: string;
+  message?: string;
+};
+
+// ---------------------------------------------------------------------------
+// 治疗响应矩阵（/api/v1/treatment-response）：治疗事件前后相邻随访的描述性变化。
+// 治疗非随机，前后差异不是因果疗效，不能用于排序治疗。
+// ---------------------------------------------------------------------------
+
+export type TreatmentResponseFeatureStat = {
+  unit?: string;
+  n_pairs?: number;
+  median_delta?: number | null;
+  q25_delta?: number | null;
+  q75_delta?: number | null;
+  median_pct?: number | null;
+};
+
+export type TreatmentResponseModality = {
+  n_events?: number;
+  n_patients?: number;
+  median_interval_days?: number | null;
+  features?: Record<string, TreatmentResponseFeatureStat>;
+};
+
+export type TreatmentResponseResponse = {
+  available?: boolean;
+  research_only?: boolean;
+  data_source?: string;
+  n_patients?: number;
+  n_events?: number;
+  features?: string[];
+  modalities?: Record<string, TreatmentResponseModality>;
   note?: string;
   message?: string;
 };

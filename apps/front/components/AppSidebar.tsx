@@ -10,6 +10,7 @@ import {
   FlaskConical,
   LayoutDashboard,
   ScatterChart,
+  Syringe,
   Users,
   Waypoints,
   type LucideIcon,
@@ -60,6 +61,7 @@ export const navGroups: NavGroup[] = [
       { href: "/simulation", label: "治疗情景", icon: FlaskConical },
       { href: "/training", label: "训练监控", icon: ChartLine },
       { href: "/latent", label: "潜在空间", icon: Waypoints },
+      { href: "/treatment-response", label: "治疗响应", icon: Syringe },
     ],
   },
   {

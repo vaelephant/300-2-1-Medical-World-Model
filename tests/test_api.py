@@ -292,3 +292,21 @@ def test_latent_endpoint(client):
     assert len(body["pca"]["explained_variance"]) >= 1
     assert "无临床含义" in body["pca"]["note"]
     assert client.get("/api/v1/latent/missing").status_code == 404
+
+
+def test_treatment_response_endpoint(client):
+    response = client.get("/api/v1/treatment-response")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["available"] is True
+    assert body["research_only"] is True
+    assert body["n_events"] > 0
+    assert set(body["features"]) == {"tumor_size_cm", "afp", "albumin", "tbil"}
+    assert "tace" in body["modalities"]
+    tace = body["modalities"]["tace"]
+    assert tace["n_events"] > 0
+    assert tace["n_patients"] > 0
+    for key in body["features"]:
+        stat = tace["features"][key]
+        assert "n_pairs" in stat and "median_delta" in stat and "median_pct" in stat
+    assert "不能" in body["note"] or "不是因果" in body["note"]

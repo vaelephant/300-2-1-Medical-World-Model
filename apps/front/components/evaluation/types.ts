@@ -20,6 +20,7 @@ export type FullEvalReport = {
   data_source?: string;
   model_version?: string;
   checkpoint?: string;
+  report_file?: string;
   split?: string;
   n_patients?: number;
   world_model?: FullMetrics;
@@ -119,4 +120,85 @@ export function buildRolloutPoints(report: FullEvalReport): RolloutPoint[] {
       maeExAfp: meanExcludingAfp(metrics),
     }))
     .sort((a, b) => a.step - b.step);
+}
+
+// ---------------------------------------------------------------------------
+// 多报告对比工具
+// ---------------------------------------------------------------------------
+
+/** 从绝对/相对路径取文件名（报告 select 使用）。 */
+export function baseName(path?: string | null): string {
+  if (!path) return "—";
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+/** 是否为 pytest / 临时目录产物的 checkpoint 路径。 */
+export function looksTemporaryCheckpoint(path?: string | null): boolean {
+  if (!path) return false;
+  return /(pytest|var\/folders|\/tmp\/|\/T\/|temp)/i.test(path);
+}
+
+/** 比较两个产物路径（允许相对/绝对后缀匹配），用于判断是否指向同一 checkpoint。 */
+export function samePath(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+  const left = normalize(a);
+  const right = normalize(b);
+  if (left === right) return true;
+  return left.endsWith(right) || right.endsWith(left);
+}
+
+export type FeatureComparisonRow = {
+  key: string;
+  label: string;
+  a: number | null;
+  b: number | null;
+};
+
+/** 逐特征 world_model MAE 的 A/B 并排数据（两报告特征并集，缺失为 null）。 */
+export function buildFeatureComparisonRows(
+  reportA: FullEvalReport,
+  reportB: FullEvalReport,
+): FeatureComparisonRow[] {
+  const perFeatureA = reportA.world_model?.mae_per_feature ?? {};
+  const perFeatureB = reportB.world_model?.mae_per_feature ?? {};
+  const keys = Array.from(new Set([...Object.keys(perFeatureA), ...Object.keys(perFeatureB)]));
+  return keys
+    .map((key) => ({
+      key,
+      label: FEATURE_LABELS[key] ?? key,
+      a: Number.isFinite(perFeatureA[key]) ? perFeatureA[key] : null,
+      b: Number.isFinite(perFeatureB[key]) ? perFeatureB[key] : null,
+    }))
+    .filter((row) => row.a !== null || row.b !== null);
+}
+
+export type RolloutComparisonRow = {
+  step: number;
+  a: number | null;
+  b: number | null;
+};
+
+/** 多步 rollout 的 mae_mean A/B 并排数据（两报告步骤并集）。 */
+export function buildRolloutComparisonRows(
+  reportA: FullEvalReport,
+  reportB: FullEvalReport,
+): RolloutComparisonRow[] {
+  const horizonsA = reportA.rollout?.horizons ?? {};
+  const horizonsB = reportB.rollout?.horizons ?? {};
+  const steps = Array.from(
+    new Set([...Object.keys(horizonsA), ...Object.keys(horizonsB)].map((step) => Number(step))),
+  )
+    .filter((step) => Number.isFinite(step))
+    .sort((a, b) => a - b);
+  return steps.map((step) => ({
+    step,
+    a: Number.isFinite(horizonsA[String(step)]?.mae_mean)
+      ? (horizonsA[String(step)].mae_mean as number)
+      : null,
+    b: Number.isFinite(horizonsB[String(step)]?.mae_mean)
+      ? (horizonsB[String(step)].mae_mean as number)
+      : null,
+  }));
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -146,6 +147,7 @@ class InferenceService:
             }
             self._traj_cache = {}
             self._latent_cache = None
+            self._treatment_cache = None
             self._dataset = dataset_summary(self.data_dir)
             self.data_source = self._dataset.get("data_source") or "unknown"
             self._max_patients = cap
@@ -370,6 +372,123 @@ class InferenceService:
             "predictions": predictions,
             "note": "研究原型输出，非临床结论；轨迹来自合成数据动力学学习。",
         }
+
+    # ------------------------------------------------------------------
+    def treatment_response_summary(self) -> Dict[str, Any]:
+        """治疗事件前后指标变化（描述性统计，不是因果疗效）。
+
+        对每位患者的每次治疗事件，比较「事件前一次随访」与「事件后一次随访」
+        的观测值，按治疗类别聚合 median Δ / median %Δ 与样本数。
+        """
+        cached = getattr(self, "_treatment_cache", None)
+        if cached is not None:
+            return cached
+
+        features = ("tumor_size_cm", "afp", "albumin", "tbil")
+        unit_map = {
+            "tumor_size_cm": "cm",
+            "afp": "ng/mL",
+            "albumin": "g/L",
+            "tbil": "μmol/L",
+        }
+
+        def quantile(values: List[float], q: float) -> Optional[float]:
+            if not values:
+                return None
+            ordered = sorted(values)
+            position = (len(ordered) - 1) * q
+            low = int(position)
+            high = min(low + 1, len(ordered) - 1)
+            fraction = position - low
+            return ordered[low] * (1.0 - fraction) + ordered[high] * fraction
+
+        per_modality: Dict[str, Dict[str, Any]] = {}
+        total_events = 0
+        for pid in self._id_to_idx:
+            traj = self.get_trajectory(pid)
+            visits = traj.visits
+            if len(visits) < 3:
+                continue
+            for index in range(1, len(visits) - 1):
+                event_visit = visits[index]
+                if not event_visit.treatments:
+                    continue
+                before = visits[index - 1].observation
+                after = visits[index + 1].observation
+                interval_days = (
+                    after.days_from_index - before.days_from_index
+                )
+                for treatment in event_visit.treatments:
+                    modality = getattr(treatment.modality, "value", str(treatment.modality))
+                    bucket = per_modality.setdefault(
+                        modality,
+                        {
+                            "n_events": 0,
+                            "patients": set(),
+                            "intervals": [],
+                            "features": {
+                                key: {"deltas": [], "pcts": []} for key in features
+                            },
+                        },
+                    )
+                    bucket["n_events"] += 1
+                    bucket["patients"].add(pid)
+                    bucket["intervals"].append(int(interval_days))
+                    total_events += 1
+                    for key in features:
+                        if before.missing_mask.get(key) or after.missing_mask.get(key):
+                            continue
+                        before_value = before.features.get(key)
+                        after_value = after.features.get(key)
+                        if not isinstance(before_value, (int, float)):
+                            continue
+                        if not isinstance(after_value, (int, float)):
+                            continue
+                        delta = float(after_value) - float(before_value)
+                        bucket["features"][key]["deltas"].append(delta)
+                        if abs(float(before_value)) > 1e-9:
+                            bucket["features"][key]["pcts"].append(
+                                delta / abs(float(before_value)) * 100.0
+                            )
+
+        modalities: Dict[str, Any] = {}
+        for modality, bucket in per_modality.items():
+            feature_stats = {}
+            for key in features:
+                deltas = bucket["features"][key]["deltas"]
+                pcts = bucket["features"][key]["pcts"]
+                feature_stats[key] = {
+                    "unit": unit_map[key],
+                    "n_pairs": len(deltas),
+                    "median_delta": float(statistics.median(deltas)) if deltas else None,
+                    "q25_delta": quantile(deltas, 0.25),
+                    "q75_delta": quantile(deltas, 0.75),
+                    "median_pct": float(statistics.median(pcts)) if pcts else None,
+                }
+            modalities[modality] = {
+                "n_events": bucket["n_events"],
+                "n_patients": len(bucket["patients"]),
+                "median_interval_days": float(statistics.median(bucket["intervals"]))
+                if bucket["intervals"]
+                else None,
+                "features": feature_stats,
+            }
+
+        result = {
+            "available": True,
+            "research_only": True,
+            "data_source": self.data_source,
+            "n_patients": len(self.dataset),
+            "n_events": total_events,
+            "features": list(features),
+            "modalities": modalities,
+            "note": (
+                "按治疗事件前后相邻随访计算的描述性变化；治疗不是随机分配的，"
+                "不能把前后差异解释为因果疗效，也不能据此排序治疗优劣。"
+            ),
+        }
+        self._treatment_cache = result
+        return result
 
     # ------------------------------------------------------------------
     def _latent_pca(self) -> Dict[str, Any]:
