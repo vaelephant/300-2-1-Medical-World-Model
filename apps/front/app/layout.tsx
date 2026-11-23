@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
-import { AppNav } from "@/components/AppNav";
+import { AppSidebar, AppTopbar } from "@/components/AppSidebar";
 import { ResearchBanner } from "@/components/ResearchBanner";
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import "./globals.css";
-
-
-
 
 const plex = IBM_Plex_Sans({
   variable: "--font-ibm-plex-sans",
@@ -26,13 +25,24 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="zh-CN" className={`${plex.variable} ${serif.variable} h-full`}>
-      <body className="min-h-full flex flex-col bg-surface text-on-surface antialiased font-sans">
-        <ResearchBanner />
-        <AppNav />
-        <main className="flex-1 mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
-          {children}
-        </main>
+    <html
+      suppressHydrationWarning
+      lang="zh-CN"
+      className={`${plex.variable} ${serif.variable} h-full`}
+    >
+      <body className="min-h-full bg-surface text-on-surface antialiased font-sans">
+        <ThemeProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset>
+              <ResearchBanner />
+              <AppTopbar />
+              <main className="flex-1 w-full px-3 py-6 sm:px-5 lg:px-6 xl:px-8">
+                {children}
+              </main>
+            </SidebarInset>
+          </SidebarProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
